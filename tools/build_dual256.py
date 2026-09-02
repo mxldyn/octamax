@@ -1141,6 +1141,14 @@ def main():
         sc, scsym = build_sidecar()
         assert not any(img[off(SIDECAR_AT):off(SIDECAR_AT) + len(sc)]), "sidecar cave not empty"
         assert SIDECAR_AT + len(sc) <= HELP_AT, "sidecar overruns into helper cave"
+        # The sidecar RUNTIME buffers (pathbuf/stream) live inside this blob and get written/zeroed at
+        # save/load, so the blob must not reach the next stub. Wave 21 grew it to 780 B and its `stream`
+        # zeroed the serializer-ext stub that used to sit at 0x400d6900 -> VEC:04 on save. That stub is
+        # now at 0x400d6a00; keep a hard guard so any future growth is caught at build time, not on HW.
+        SIDECAR_LIMIT = 0x400d6a00
+        assert SIDECAR_AT + len(sc) <= SIDECAR_LIMIT, (
+            f"sidecar blob {len(sc)} B ends 0x{SIDECAR_AT + len(sc):08x} > 0x{SIDECAR_LIMIT:08x} "
+            f"(would clobber the next cave stub at runtime)")
         img[off(SIDECAR_AT):off(SIDECAR_AT) + len(sc)] = sc
         # SAVE hook: 6 bytes tstl a3(4a8b) beqs+2(6702) jsr a3@(4e93) -> jmp sidecar_save
         o = off(SAVE_HOOK)

@@ -26,7 +26,10 @@ import build_dual256 as bd
 
 SRC = pathlib.Path("out/mainos_dual256.bin")   # the working W6 image (built first)
 OUT = pathlib.Path("out/mainos_persist256.bin")
-SER_CAVE = 0x400d6900          # free when TRACE is off
+SER_CAVE = 0x400d6a00          # was 0x400d6900, but wave-21 grew the sidecar blob to 780 B (0x400d690c),
+                               # whose `stream` buffer (0x400d68cc..0x400d690c) zeroed the first 12 B of a
+                               # stub at 0x400d6900 at runtime -> VEC:04 on save. Moved past the sidecar
+                               # into the validated cave [0x400d6a00,0x400d6b00). (2026-09-02)
 SET_B = bd.SET_B               # 0x47701a00 SETTINGS-B
 SER_TAIL = 0x40089608          # cmpi.l #129,d4 ; bnew 0x40089420  (10 bytes)
 SER_BODY = 0x40089420
