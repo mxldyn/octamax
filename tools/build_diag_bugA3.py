@@ -47,6 +47,17 @@ ra_full:
     suba.l  %a1,%a1
     rts
 
+| ==== WK: per-bank load/save worker 0x4009115c. Count invocations so M1 can tell if banks are already
+|      loaded when the STATIC bulk-load runs. Displaced `moveal fp@(28),a2 ; clrl -(sp)` (6 bytes).
+wk_probe:
+    lea     0x{PROBE:x},%a1
+    movea.l #0x{MAGIC:x},%a0
+    move.l  %a0,(%a1)
+    addq.l  #1,0x18(%a1)                | cntWK
+    movea.l %fp@(28),%a2
+    clr.l   -(%sp)
+    jmp     0x4009116a
+
 | ==== AS: assign. records [off][value] (reference).
 as_probe:
     adda.l  #0x8f04a,%a0
@@ -114,7 +125,10 @@ scannx:
     movea.l %d0,%a0
     adda.l  #0x8f04a,%a0
     move.l  (%a0),%d1
-    move.l  %d1,4(%a1)                  | [4] long@0x8f04a (nonzero => bank loaded)
+    move.l  %d1,4(%a1)                  | [4] long@0x8f04a (nonzero => bank loaded OR stale)
+    lea     0x{PROBE:x},%a0
+    move.l  0x18(%a0),%d1
+    move.l  %d1,8(%a1)                  | [8] cntWK so far (>0 => banks loaded before bulk-load)
 1:  movem.l (%sp),%d0-%d5/%a0-%a1
     lea     32(%sp),%sp
     move.l  %d0,%d2
@@ -128,12 +142,13 @@ LAYOUT = {
     "AS": {"counter": 0x04, "array": 0x40, "entry": 12, "cap": 8,
            "fields": [("off", 0, "hex"), ("value", 4, "s32")]},
     "M1": {"counter": 0x08, "array": 0xa0, "entry": 12, "cap": 8,
-           "fields": [("count_159", 0, "s32"), ("bank_witness_0x8f04a", 4, "hex")]},
+           "fields": [("count_159", 0, "s32"), ("bank_witness_0x8f04a", 4, "hex"), ("cntWK_bankloads", 8, "s32")]},
 }
 
 HOOKS = [
     (0x400795ba, "d1fc0008f04a", "as_probe"),
     (0x400908ac, "2400508f6c26", "m1_probe"),
+    (0x40091164, "246e001c42a7", "wk_probe"),
 ]
 
 
