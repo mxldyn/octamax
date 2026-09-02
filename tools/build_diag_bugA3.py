@@ -108,7 +108,13 @@ scannx:
     subq.l  #1,%d1
     bne.b   scanlp
     move.l  %d2,(%a1)                   | [0] count of 159
-    move.l  %d3,4(%a1)                  | [4] first hit absolute addr (0xffffffff if none)
+    | witness: is the bank loaded at M1? record the flat track0 long @bankbase+0x8f04a
+    movea.l #0x{BANKPTR:x},%a0
+    move.l  (%a0),%d0
+    movea.l %d0,%a0
+    adda.l  #0x8f04a,%a0
+    move.l  (%a0),%d1
+    move.l  %d1,4(%a1)                  | [4] long@0x8f04a (nonzero => bank loaded)
 1:  movem.l (%sp),%d0-%d5/%a0-%a1
     lea     32(%sp),%sp
     move.l  %d0,%d2
@@ -122,7 +128,7 @@ LAYOUT = {
     "AS": {"counter": 0x04, "array": 0x40, "entry": 12, "cap": 8,
            "fields": [("off", 0, "hex"), ("value", 4, "s32")]},
     "M1": {"counter": 0x08, "array": 0xa0, "entry": 12, "cap": 8,
-           "fields": [("count_159", 0, "s32"), ("first_hit_addr", 4, "hex")]},
+           "fields": [("count_159", 0, "s32"), ("bank_witness_0x8f04a", 4, "hex")]},
 }
 
 HOOKS = [
