@@ -830,6 +830,23 @@ def build_sidecar():
     re-emits it verbatim (raw bytes) so register restore is byte-identical."""
     import subprocess, pathlib
     ln = SETB_HI - SETB_LO
+    # --- BUG B fix (wave 21): prime STATE-B[idx] for each restored HIGH slot so its voice binds
+    # from a trig WITHOUT first opening the AED. On RELOAD, SET-B is repopulated by this raw copy
+    # and the per-slot loader never runs for idx>=128, so STATE-B[idx]@16 (buffer/window count) stays
+    # 0 and the voice-bind resolver FUN_4000f450 bails (@16<=0 -> per-voice reset = silence). The AED's
+    # sampleview FUN_40093980 sets @16 (0x40093c92) + streaming setup, which is why opening the AED once
+    # makes the slot sound. We call the SAME sampleview here, only for POPULATED slots (we are already
+    # inside the path[0]!=0 branch), with the SAME (slot, 1) args the bulk STATIC loader uses at
+    # 0x400908a2. sampleview saves d2-d7/a2-a4, so the loop's d2 (counter)/a2 (TEMP)/a3 (SET-B) survive;
+    # it links its own frame so the load fn's fp is preserved. File I/O is live at this hook (the sidecar
+    # already opens+reads project.256 here). Toggle PRIME_STATEB_ON_RESTORE=False if it regresses on HW.
+    PRIME_STATEB_ON_RESTORE = True
+    PRIME_ASM = (f"""move.l  #256,%d0
+    sub.l   %d2,%d0                    | idx = 256 - d2  (d2:128->idx128 .. 1->idx255)
+    pea     0x1                        | arg2 = 1 (match bulk loader's sampleview call @0x400908a2)
+    move.l  %d0,-(%sp)                 | arg1 = slot idx
+    jsr     0x40093980                 | sampleview: sets STATE-B @8/@16/@36 + streaming so the voice binds
+    addq.l  #8,%sp""" if PRIME_STATEB_ON_RESTORE else "")
     asm = f"""    .cpu 5407
     .text
 sidecar_save:
@@ -934,6 +951,7 @@ sidecar_load:
 7:  move.l  (%a0)+,(%a1)+
     subq.l  #1,%d1
     bne.b   7b
+    {PRIME_ASM}
 8:  lea     0x448(%a2),%a2
     lea     0x448(%a3),%a3
     subq.l  #1,%d2
