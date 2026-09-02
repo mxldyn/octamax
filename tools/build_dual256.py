@@ -537,6 +537,23 @@ SENTINEL_FIX = {
     # Wave 13 (assign type-1): open the emitter 0x40023f1c STATIC clamp `cmpa.l #128,a2; bhi` @0x40023f34
     # so idx>=128 reaches the type-1 (open-file) emission instead of bailing. imm at 0x40023f34+2.
     0x40023f36: (b"\x00\x00\x00\x80", b"\x00\x00\x01\x00", "assign type-1 emitter clamp #128->#256 @0x40023f34"),
+    # --- Wave 20: p-lock (sample-lock) AUTHORING caps. Playback of high-slot locks already works
+    # (mvsb reload + migrated resolver, see emu_seq_plock); only the WRITE caps rejected values >=128.
+    # All three are `moveq #127,dN ; cmpl %d3,dN ; bcs/blt <bail>` on the value-to-lock in d3, rewritten
+    # in place (same byte count, branch stays at its address with its displacement) to
+    # `cmpi.w #254,%d3 ; bhi <same bail>`. Cap is 254, NOT 255: byte 0xff is the no-lock sentinel in the
+    # p-lock table 0x46c7dff9, so slot 255 (idx 255 = UI slot 256) is inherently un-lockable -- it can
+    # only be a track default. d3 here is the raw value (0..max) so the word compare is safe; -1 aborts
+    # via bhi exactly as it did via bcs. hookcheck'd: no branch lands inside any window. The display
+    # resolvers the authoring UI needs (FUN_40031d18, FUN_4004ff14) were ALREADY migrated by the
+    # descriptor/dspcount waves. NOTE (live-rec fn): the third cap's original left d5=127 loaded, but
+    # d5 is dead there (overwritten at 0x400436b6 before any read).
+    0x4004fa64: (b"\x72\x7f\xb2\x83\x65\x00\x01\x24", b"\x0c\x43\x00\xfe\x62\x00\x01\x24",
+                 "p-lock setter FUN_4004f8dc write cap #127->#254 @0x4004fa64"),
+    0x40043682: (b"\x72\x7f\xb2\x83\x65\x00\x00\x94", b"\x0c\x43\x00\xfe\x62\x00\x00\x94",
+                 "live-rec p-lock FUN_40043664 cap #1 #127->#254 @0x40043682"),
+    0x400436a2: (b"\x7a\x7f\xba\x83\x6d\x74", b"\x0c\x43\x00\xfe\x62\x74",
+                 "live-rec p-lock FUN_40043664 cap #2 #127->#254 @0x400436a2 (spec missed this one)"),
 }
 
 # --- Wave 12/13: extra code stubs in the free cave [0x400d6b00, 0x400d7000) ---
