@@ -29,7 +29,10 @@ OUT = pathlib.Path("out/mainos_diag_bugA2.bin")
 CODE, PROBE = 0x400d7100, 0x40ab65e0
 MAGIC = 0x10ade111
 BANKPTR = 0x46c82456
-FIELD_OFF = 0x8f1bd
+# The assigned track's field offset within the bank buffer. P49 AS capture gave 0x8F05E for the track
+# the user assigned (0x8F04A + 4*5 = track index 4). REUSE THE SAME TRACK so this hardcode matches; AS
+# still records the live offset as a cross-check.
+FIELD_OFF = 0x8f05e
 
 ASM = f"""    .cpu 5407
     .text
@@ -105,10 +108,11 @@ m1_probe:
     jmp     0x400908b2
 2:  jmp     0x400908d8
 
-| ==== M2: track-name display formatter 0x4005a6ac. Displaced `addal #0x8F04A,%a0` (a0 = displayed field).
+| ==== M2: trackparam FUN_40005030 read 0x40005078. Displaced `addal #0x8F04A,%a1` (a1 = default array).
+|      Fires when a trig plays. We read the TRACKED field (bankbase+FIELD_OFF) AND trackparam's own a1.
 m2_probe:
-    adda.l  #0x8f04a,%a0
-    move.l  %a0,-(%sp)
+    adda.l  #0x8f04a,%a1
+    move.l  %a1,-(%sp)
     lea     -24(%sp),%sp
     movem.l %d0-%d3/%a0-%a1,(%sp)
     moveq   #8,%d0
@@ -124,16 +128,16 @@ m2_probe:
     movea.l %d0,%a0
     adda.l  #0x{FIELD_OFF:x},%a0
     moveq   #0,%d1
-    move.b  (%a0),%d1                   | hardcoded field byte
+    move.b  (%a0),%d1                   | tracked field byte (bankbase+FIELD_OFF)
     move.l  %d1,(%a1)
-    movea.l 24(%sp),%a0                 | displayed field addr
+    movea.l 24(%sp),%a0                 | trackparam's own a1 (default array field)
     moveq   #0,%d1
     move.b  (%a0),%d1
-    move.l  %d1,4(%a1)                  | byte this draw reads
+    move.l  %d1,4(%a1)                  | byte trackparam itself reads
 2:  movem.l (%sp),%d0-%d3/%a0-%a1
     lea     24(%sp),%sp
     addq.l  #4,%sp
-    jmp     0x4005a6b2
+    jmp     0x4000507e
 """
 
 LAYOUT = {
@@ -142,13 +146,13 @@ LAYOUT = {
     "M1": {"counter": 0x08, "array": 0xa0, "entry": 12, "cap": 8,
            "fields": [("field_during_load", 0, "s32"), ("bankbase", 4, "hex")]},
     "M2": {"counter": 0x0c, "array": 0x120, "entry": 12, "cap": 8,
-           "fields": [("field_hardcoded", 0, "s32"), ("field_UI_reads", 4, "s32")]},
+           "fields": [("tracked_field", 0, "s32"), ("trackparam_reads", 4, "s32")]},
 }
 
 HOOKS = [
     (0x400795ba, "d1fc0008f04a", "as_probe"),
     (0x400908ac, "2400508f6c26", "m1_probe"),
-    (0x4005a6ac, "d1fc0008f04a", "m2_probe"),
+    (0x40005078, "d3fc0008f04a", "m2_probe"),
 ]
 
 
