@@ -94,8 +94,8 @@ arm_regs:
     move.w  #0x2c8d,(%a2)                | WDMREG word0 for ABLR (DRc 0x0D)
     move.l  %a0,2(%a2)                   | operand = field addr
     wdebug  (%a2)
-    lea     ten,%a2
-    wdebug  (%a2)
+    | NOTE: TDR left DISABLED here (do not arm during the interactive assign -- an imprecise debug
+    | interrupt mid-ui_apply breaks selection). en_probe enables TDR at the reload's bulk-load.
     movem.l (%sp),%d0-%d3/%a1-%a2
     lea     24(%sp),%sp
     jmp     0x400795c0
@@ -128,6 +128,28 @@ bp_ret:
     lea     24(%sp),%sp
     rte
 
+| ================= EN: bulk-load 0x400908ac -- ENABLE the watchpoint at reload start =================
+| Fires during (re)load. Only arms once a field addr has been captured by a prior assign (PROBE+0x10!=0),
+| so the initial post-flash load does not arm. Replicates `movel d0,d2 ; addql #8,sp ; bge 0x400908d8`.
+en_probe:
+    move.l  %d0,-(%sp)
+    move.l  %a0,-(%sp)
+    lea     0x{PROBE:x},%a0
+    move.l  0x10(%a0),%d0                | field addr
+    tst.l   %d0
+    beq.b   en_skip
+    lea     ten,%a0
+    wdebug  (%a0)                        | TDR = enable (arm the write breakpoint)
+en_skip:
+    move.l  (%sp)+,%a0
+    move.l  (%sp)+,%d0
+    move.l  %d0,%d2                      | replicate movel d0,d2
+    addq.l  #8,%sp                       | replicate addql #8,sp (a7 -> no CC change)
+    bge.b   en_go
+    jmp     0x400908b2
+en_go:
+    jmp     0x400908d8
+
     .balign 4
 twdis:  .byte 0x2c,0x87, 0x00,0x00, 0x00,0x00, 0x00,0x00      | TDR=0 (disable); 8B, 4-aligned (wdebug.l needs aligned operand)
     .balign 4
@@ -148,6 +170,7 @@ LAYOUT = {
 
 HOOKS = [
     (0x400795ba, "d1fc0008f04a", "arm_probe"),
+    (0x400908ac, "2400508f6c26", "en_probe"),
 ]
 
 
