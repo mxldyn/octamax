@@ -16,7 +16,8 @@ Verified against MCF5407UM (Rev C debug):
 
 ARM at the assign hook 0x400795ba (a0 = field addr): store field addr, install handler at 0x40000030,
 program TDR=0 -> AATR -> ABLR=field -> TDR=enable. The assign's own store fires first (expect value=159),
-then reload writes fire. HANDLER records [PC][field byte] into a ring (cap 16).
+then reload writes fire. HANDLER records [PC][field byte] into a ring (cap 16) then re-writes TDR to clear BSTAT
+(level-sensitive trigger status) and re-arm -- without this the debug interrupt re-fires and hangs.
 
 PROCEDURE: SAME track, assign UI 160, SAVE, RELOAD, (play), SAVE. Delete project.256 first. Avoid 252/253.
     python3 tools/read_probe.py <project.256> --build build_diag_bugA5
@@ -121,6 +122,8 @@ bp_handler:
     move.b  (%a0),%d0
     move.l  %d0,4(%a1)                   | field byte value at this write
 bp_ret:
+    lea     ten,%a0                      | ACK: re-write TDR to clear CSR[BSTAT] (level) and re-arm,
+    wdebug  (%a0)                        | else the trigger stays asserted and re-fires -> hang
     movem.l (%sp),%d0-%d3/%a0-%a1
     lea     24(%sp),%sp
     rte
