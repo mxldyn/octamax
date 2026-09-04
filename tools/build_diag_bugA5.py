@@ -56,48 +56,22 @@ ra_full:
     suba.l  %a1,%a1
     rts
 
-| ================= ARM: assign hook 0x400795ba (displaced `addal #0x8F04A,%a0`) =================
+| ================= ARM: assign hook 0x400795ba -- ONLY record the field addr (nothing dangerous) ==
+| The interactive assign must run untouched: NO debug programming, NO vector install here. Just capture
+| the field addr (a0 after the replicated addal) for en_probe to use at reload. a0 and d1 (value) survive.
 arm_probe:
-    adda.l  #0x8f04a,%a0                 | a0 = field addr (MUST survive to the real store @0x400795c0)
-    lea     -24(%sp),%sp
-    movem.l %d0-%d3/%a1-%a2,(%sp)        | save scratch (a0 and d1=value are preserved)
+    adda.l  #0x8f04a,%a0                 | a0 = field addr (replicate; MUST survive to 0x400795c0)
+    lea     -12(%sp),%sp
+    movem.l %d0/%a1-%a2,(%sp)            | save scratch (a0 and d1 preserved)
     lea     0x{PROBE:x},%a1
     move.l  #0x{MAGIC:x},(%a1)
-    move.l  %a0,0x10(%a1)                | PROBE+0x10 = field addr (handler reads its value here)
-    | AS record: off = a0 - *(bankptr), value = d1
-    moveq   #8,%d0
-    moveq   #8,%d1                       | cntAS
-    moveq   #0x40,%d2                    | AS arr
-    moveq   #12,%d3
-    move.l  %a0,-(%sp)                   | stash field addr across rec_alloc
-    bsr.w   rec_alloc
-    move.l  (%sp)+,%a2                   | a2 = field addr
-    move.l  %a1,%d0
-    tst.l   %d0
-    beq.b   arm_regs
-    move.l  %a2,%d0
-    movea.l #0x{BANKPTR:x},%a1
-    sub.l   (%a1),%d0                    | off
-    lea     0x{PROBE:x},%a1
-    move.l  %d0,0x40(%a1)                | AS[0].off
-arm_regs:
-    | install vector-12 handler
-    move.l  #bp_handler,%d0
-    move.l  %d0,0x{VEC12:x}
-    | program debug regs (TDR off, AATR, ABLR=field, TDR enable)
-    lea     twdis,%a2
-    wdebug  (%a2)
-    lea     taatr,%a2
-    wdebug  (%a2)
-    | build ABLR command with the field addr (a0 stashed? a0 still = field addr)
-    lea     ablrcmd,%a2
-    move.w  #0x2c8d,(%a2)                | WDMREG word0 for ABLR (DRc 0x0D)
-    move.l  %a0,2(%a2)                   | operand = field addr
-    wdebug  (%a2)
-    | NOTE: TDR left DISABLED here (do not arm during the interactive assign -- an imprecise debug
-    | interrupt mid-ui_apply breaks selection). en_probe enables TDR at the reload's bulk-load.
-    movem.l (%sp),%d0-%d3/%a1-%a2
-    lea     24(%sp),%sp
+    move.l  %a0,0x10(%a1)                | PROBE+0x10 = field addr
+    move.l  %a0,0x40(%a1)                | AS[0].addr
+    move.l  %d1,0x44(%a1)                | AS[0].value
+    moveq   #1,%d0
+    move.l  %d0,0x08(%a1)                | cntAS = 1
+    movem.l (%sp),%d0/%a1-%a2
+    lea     12(%sp),%sp
     jmp     0x400795c0
 
 | ================= vector-12 debug-interrupt handler =================
@@ -128,21 +102,31 @@ bp_ret:
     lea     24(%sp),%sp
     rte
 
-| ================= EN: per-bank load worker 0x40091164 -- ENABLE the watchpoint at RELOAD only =========
-| The bank worker runs on PROJECT (re)load, NOT on an in-session sample load (that only loads SET-B), so
-| arming here does not disturb the interactive slot select. Guarded on a captured field addr so the initial
-| post-flash load does not arm. Replicates `moveal fp@(28),a2 ; clrl -(sp)` then jmp 0x4009116a.
+| ================= EN: per-bank load worker 0x40091164 -- do ALL debug setup at RELOAD only ==========
+| Runs on PROJECT reload, not on in-session sample load. If a field addr was captured by a prior assign,
+| install the vector-12 handler and program the debug module (AATR + ABLR=field + TDR enable) HERE, so the
+| interactive assign is never touched. Then replicate `moveal fp@(28),a2 ; clrl -(sp)` and continue.
 en_probe:
-    move.l  %d0,-(%sp)
-    move.l  %a0,-(%sp)
+    lea     -20(%sp),%sp
+    movem.l %d0-%d1/%a0-%a2,(%sp)
     lea     0x{PROBE:x},%a0
-    move.l  0x10(%a0),%d0                | field addr captured by a prior assign
+    move.l  0x10(%a0),%d0                | field addr captured at assign
     beq.b   en_skip
-    lea     ten,%a0
-    wdebug  (%a0)                        | TDR = enable (arm the write breakpoint for the reload)
+    move.l  #bp_handler,%d1
+    move.l  %d1,0x{VEC12:x}              | install vector-12 handler
+    lea     twdis,%a2
+    wdebug  (%a2)                        | TDR = 0 (disable while loading regs)
+    lea     taatr,%a2
+    wdebug  (%a2)                        | AATR = 0x7F00
+    lea     ablrcmd,%a2
+    move.w  #0x2c8d,(%a2)
+    move.l  %d0,2(%a2)                   | ABLR = field addr
+    wdebug  (%a2)
+    lea     ten,%a2
+    wdebug  (%a2)                        | TDR = enable
 en_skip:
-    move.l  (%sp)+,%a0
-    move.l  (%sp)+,%d0
+    movem.l (%sp),%d0-%d1/%a0-%a2
+    lea     20(%sp),%sp
     movea.l %fp@(28),%a2                 | replicate moveal fp@(28),a2
     clr.l   -(%sp)                       | replicate clrl -(sp)
     jmp     0x4009116a
