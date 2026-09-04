@@ -105,10 +105,11 @@ bp_ret:
     lea     24(%sp),%sp
     rte
 
-| ================= EN: per-bank load worker 0x40091164 -- do ALL debug setup at RELOAD only ==========
-| Runs on PROJECT reload, not on in-session sample load. If a field addr was captured by a prior assign,
-| install the vector-12 handler and program the debug module (AATR + ABLR=field + TDR enable) HERE, so the
-| interactive assign is never touched. Then replicate `moveal fp@(28),a2 ; clrl -(sp)` and continue.
+| ================= EN: STATIC bulk-load 0x400908ac -- do ALL debug setup, arms ONLY at reload =========
+| The bank worker 0x40091164 does NOT fire on a project RELOAD (en_armed=0 proved it). The bulk-load DOES
+| fire on reload. It also fires on an in-session sample load, but en_probe only arms when an OFFSET was
+| captured by a prior assign (PROBE+0x10!=0); the sample load happens BEFORE the assign, so offset=0 then
+| and en_probe skips -- the interactive select stays clean. Replicates `movel d0,d2 ; addql #8,sp ; bge`.
 en_probe:
     lea     -20(%sp),%sp
     movem.l %d0-%d1/%a0-%a2,(%sp)
@@ -136,9 +137,12 @@ en_probe:
 en_skip:
     movem.l (%sp),%d0-%d1/%a0-%a2
     lea     20(%sp),%sp
-    movea.l %fp@(28),%a2                 | replicate moveal fp@(28),a2
-    clr.l   -(%sp)                       | replicate clrl -(sp)
-    jmp     0x4009116a
+    move.l  %d0,%d2                      | replicate movel d0,d2
+    addq.l  #8,%sp                       | replicate addql #8,sp
+    bge.b   en_go
+    jmp     0x400908b2
+en_go:
+    jmp     0x400908d8
 
     .balign 4
 twdis:  .byte 0x2c,0x87, 0x00,0x00, 0x00,0x00, 0x00,0x00      | TDR=0 (disable); 8B, 4-aligned (wdebug.l needs aligned operand)
@@ -162,7 +166,7 @@ LAYOUT = {
 
 HOOKS = [
     (0x400795ba, "d1fc0008f04a", "arm_probe"),
-    (0x40091164, "246e001c42a7", "en_probe"),
+    (0x400908ac, "2400508f6c26", "en_probe"),
 ]
 
 
