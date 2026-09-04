@@ -65,8 +65,11 @@ arm_probe:
     movem.l %d0/%a1-%a2,(%sp)            | save scratch (a0 and d1 preserved)
     lea     0x{PROBE:x},%a1
     move.l  #0x{MAGIC:x},(%a1)
-    move.l  %a0,0x10(%a1)                | PROBE+0x10 = field addr
-    move.l  %a0,0x40(%a1)                | AS[0].addr
+    move.l  %a0,%d0
+    movea.l #0x{BANKPTR:x},%a2
+    sub.l   (%a2),%d0                    | d0 = offset = fieldaddr - *(bankptr)
+    move.l  %d0,0x10(%a1)                | PROBE+0x10 = OFFSET (reload recomputes the absolute addr)
+    move.l  %a0,0x40(%a1)                | AS[0].addr (absolute, reference)
     move.l  %d1,0x44(%a1)                | AS[0].value
     moveq   #1,%d0
     move.l  %d0,0x08(%a1)                | cntAS = 1
@@ -90,7 +93,7 @@ bp_handler:
     beq.b   bp_ret
     move.l  28(%sp),%d0                  | stacked PC (frame long1 = sp@(24)+4)
     move.l  %d0,(%a1)
-    movea.l #0x{PROBE + 0x10:x},%a0
+    movea.l #0x{PROBE + 0x18:x},%a0
     movea.l (%a0),%a0                    | field addr
     moveq   #0,%d0
     move.b  (%a0),%d0
@@ -110,8 +113,14 @@ en_probe:
     lea     -20(%sp),%sp
     movem.l %d0-%d1/%a0-%a2,(%sp)
     lea     0x{PROBE:x},%a0
-    move.l  0x10(%a0),%d0                | field addr captured at assign
+    move.l  0x10(%a0),%d0                | OFFSET captured at assign
     beq.b   en_skip
+    movea.l #0x{BANKPTR:x},%a1
+    move.l  (%a1),%d1                    | current bankbase
+    add.l   %d1,%d0                      | d0 = fieldaddr = bankbase + offset (RELOAD-time absolute)
+    move.l  %d0,0x18(%a0)                | PROBE+0x18 = computed field addr (handler reads value here)
+    move.l  %d1,0x1c(%a0)                | PROBE+0x1c = reload bankbase (diag)
+    addq.l  #1,0x14(%a0)                 | PROBE+0x14 = en_armed counter
     move.l  #bp_handler,%d1
     move.l  %d1,0x{VEC12:x}              | install vector-12 handler
     lea     twdis,%a2
@@ -147,6 +156,8 @@ LAYOUT = {
            "fields": [("off", 0, "hex"), ("value", 4, "s32")]},
     "BP": {"counter": 0x04, "array": 0xa0, "entry": 8, "cap": 16,
            "fields": [("PC", 0, "hex"), ("field_value", 4, "s32")]},
+    "DIAG": {"counter": 0x14, "array": 0x18, "entry": 8, "cap": 1,
+             "fields": [("computed_ABLR", 0, "hex"), ("reload_bankbase", 4, "hex")]},
 }
 
 HOOKS = [
