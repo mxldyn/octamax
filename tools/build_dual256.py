@@ -74,6 +74,7 @@ LOADLOOP_HOOK = 0x400908f4     # 14 B: lea a2@(1096),a2 ; cmpi.l #128,d3 ; bnew 
 LOADLOOP_BODY = 0x4009087a     # loop head (body start)
 LOADLOOP_EXIT = 0x40090902     # after the loop (FLEX loop follows)
 LOADLOOP_STUB = 0x400d77c0     # free cave after the (Wave-10-extended) helper family; before 0x400d7c00
+COMMIT_AT = 0x400d7800         # wave 25: token re-commit sweep (cave after LOADLOOP_STUB, verified empty)
 # --- Wave 19 (frontier): extended STATIC allocator -- walk STATE-B after STATE-A so a NEW sample can be
 # assigned to a high slot on-device. Detour replaces the 16-byte loop tail [0x400240ac,0x400240bc).
 MIGRATE_ALLOC = True
@@ -718,6 +719,87 @@ alloc_adv:
     return blob
 
 
+def build_commit_stub():
+    """WAVE 25: re-commit the voice-bind GENERATION TOKEN for restored high slots.
+
+    P74 settled it. After a reload the audio engine asks the resolver for the RIGHT slot (159, five
+    times in a row straight after the load) -- the "STATIC 001" in the AED title is a separate UI
+    quirk, not the audio path. Every one of those calls found STRIDE4-B[31] = 0 while STATE-B[31]@20
+    was 3, so the resolver failed its third condition (0x4000f502: STATE@20 == STRIDE4[idx]) and
+    dropped the voice. @16 and @8 were already correct.
+
+    The token is written by sampleslice's tail, which stores STATE@20 as it is AT THAT MOMENT.
+    sampleview commits it (0x40093cf2) while the bulk load loop is still running, when @20 is still 0;
+    @20 only settles later, and nothing re-commits -- hence a permanent mismatch, and hence why opening
+    the AED (which re-runs the whole chain) cures it.
+
+    Wave 24's sweep could never fix this: it skipped every slot whose @16 was already non-zero, which
+    is exactly the set the bulk loop had just armed. The gate here is the mismatch itself.
+
+    Runs at the bulk load loop's exit (LOADLOOP_EXIT), the last load-time point where SET-B is
+    populated -- P72 showed SET-B is still EMPTY at the boot loader's epilogue, and P74's marker
+    confirms this point precedes every resolver call. Idempotent: a slot whose token already matches
+    is skipped, so it costs nothing on the paths that were already correct."""
+    import subprocess, pathlib
+    asm = f"""    .cpu 5407
+    .text
+commit_hi:
+    lea     -32(%sp),%sp
+    movem.l %d0-%d3/%a0-%a3,(%sp)
+    lea     0x{SET_B:x},%a2                | SETTINGS-B[0]
+    lea     0x{ST_B:x},%a3                 | STATE-B[0]
+    move.l  #128,%d2                       | slots left
+    move.l  #128,%d3                       | idx
+ci_loop:
+    tst.b   (%a2)                          | empty slot -> nothing to commit
+    beq.b   ci_next
+    tst.l   16(%a3)                        | not armed (@16 <= 0) -> the resolver bails anyway
+    ble.b   ci_next
+    move.l  %d3,%d0
+    subi.l  #128,%d0
+    lsl.l   #2,%d0                         | idxB*4
+    move.l  20(%a3),%d1                    | STATE@20 = the token the resolver will demand
+    lea     0x{S42_B:x},%a0
+    adda.l  %d0,%a0
+    cmp.l   (%a0),%d1                      | already committed in STRIDE4#2?
+    beq.b   ci_next
+    lea     0x{S41_B:x},%a0
+    adda.l  %d0,%a0
+    cmp.l   (%a0),%d1                      | ... or in STRIDE4#1?
+    beq.b   ci_next
+    move.l  %d3,-(%sp)                     | arg2 = slot
+    clr.l   -(%sp)                         | arg1 = type 0 (STATIC)
+    jsr     0x40099680                     | the SAME slice/commit wrapper sampleview calls @0x40093cf2
+    addq.l  #8,%sp
+ci_next:
+    lea     0x448(%a2),%a2
+    lea     44(%a3),%a3
+    addq.l  #1,%d3
+    subq.l  #1,%d2
+    bne.b   ci_loop
+    movem.l (%sp),%d0-%d3/%a0-%a3
+    lea     32(%sp),%sp
+    rts
+
+| ---- LOADLOOP_EXIT stub: sweep, then re-emit the displaced `jsr 0x40096a5c` and continue. ----
+commit_hook:
+    bsr.b   commit_hi
+    jsr     0x40096a5c
+    jmp     0x{LOADLOOP_EXIT + 6:x}
+"""
+    pathlib.Path("out/_ci.s").write_text(asm)
+    subprocess.run(["m68k-elf-as", "-mcpu=5407", "-o", "out/_ci.o", "out/_ci.s"], check=True)
+    subprocess.run(["m68k-elf-ld", "-Ttext=0x%x" % COMMIT_AT, "-o", "out/_ci.elf", "out/_ci.o"],
+                   capture_output=True)
+    subprocess.run(["m68k-elf-objcopy", "-O", "binary", "out/_ci.elf", "out/_ci.bin"], check=True)
+    blob = pathlib.Path("out/_ci.bin").read_bytes()
+    nm = subprocess.run(["m68k-elf-nm", "out/_ci.elf"], capture_output=True, text=True).stdout
+    sym = {p[2]: int(p[0], 16) for p in (l.split() for l in nm.splitlines()) if len(p) == 3}
+    for f in ("out/_ci.s", "out/_ci.o", "out/_ci.elf", "out/_ci.bin"):
+        pathlib.Path(f).unlink(missing_ok=True)
+    return blob, sym
+
+
 def build_loadloop_stub():
     """Assemble the project-load bulk-loader tail (replaces the 14-byte a2-walk + #128 bound). At entry
     d3 = idx (already incremented for the NEXT slot), a2 = current SETTINGS ptr. Redirect a2 across the
@@ -1284,6 +1366,20 @@ def main():
         img[o + 6:o + 14] = b"\x4e\x71" * 4                              # nop padding
         print(f"loadloop: {len(ll)} B @0x{LOADLOOP_STUB:08x}; hook 0x{LOADLOOP_HOOK:08x} (a2 walk+bound "
               f"-> B@idx128, bound 256); RELOAD now loads STATIC 129..256")
+
+        # 2d1b) WAVE 25: re-commit the voice-bind generation token for restored high slots, at the
+        # bulk load loop's exit. P74: the engine asks for the right slot but STRIDE4-B[idx] is 0 while
+        # STATE@20 is 3, so the resolver's third condition fails and the voice is dropped -- the token
+        # was committed mid-load while @20 was still 0 and nothing re-commits it afterwards.
+        ci, cisym = build_commit_stub()
+        assert not any(img[off(COMMIT_AT):off(COMMIT_AT) + len(ci)]), "commit cave not empty"
+        assert COMMIT_AT + len(ci) <= 0x400d7c00, "commit stub overruns the cave"
+        img[off(COMMIT_AT):off(COMMIT_AT) + len(ci)] = ci
+        o = off(LOADLOOP_EXIT)
+        assert bytes(img[o:o + 6]) == b"\x4e\xb9\x40\x09\x6a\x5c", img[o:o + 6].hex()
+        img[o:o + 6] = b"\x4e\xf9" + cisym["commit_hook"].to_bytes(4, "big")
+        print(f"  wave 25: {len(ci)} B @0x{COMMIT_AT:08x}; hook 0x{LOADLOOP_EXIT:08x} -> commit_hook "
+              f"@0x{cisym['commit_hook']:08x} (re-commit STRIDE4-B[idx] = STATE@20 for armed high slots)")
 
     # 2d2) Wave 19: extended STATIC allocator -- walk STATE-B after STATE-A (on-device high-slot assign)
     if MIGRATE_ALLOC:
