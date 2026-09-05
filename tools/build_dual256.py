@@ -74,7 +74,12 @@ LOADLOOP_HOOK = 0x400908f4     # 14 B: lea a2@(1096),a2 ; cmpi.l #128,d3 ; bnew 
 LOADLOOP_BODY = 0x4009087a     # loop head (body start)
 LOADLOOP_EXIT = 0x40090902     # after the loop (FLEX loop follows)
 LOADLOOP_STUB = 0x400d77c0     # free cave after the (Wave-10-extended) helper family; before 0x400d7c00
-COMMIT_AT = 0x400d7800         # wave 25: token re-commit sweep (cave after LOADLOOP_STUB, verified empty)
+COMMIT_AT = 0x400d7800         # wave 25/26: token re-commit sweep + AED publish (cave after LOADLOOP_STUB)
+AED_TITLE = 0x4006df74         # wave 26: the AED title formatter's read of its current-slot global
+                               # (6B: moveal 0x46c8d19c,%a0) -- the first draw after a load happens
+                               # before anything publishes the slot, so it renders 0 as "STATIC 001"
+BANKPTR   = 0x46c82456         # -> the active bank buffer
+G_PATTERN, G_TRACK = 0x100b14cf, 0x100b14cc
 # --- Wave 19 (frontier): extended STATIC allocator -- walk STATE-B after STATE-A so a NEW sample can be
 # assigned to a high slot on-device. Detour replaces the 16-byte loop tail [0x400240ac,0x400240bc).
 MIGRATE_ALLOC = True
@@ -781,11 +786,68 @@ ci_next:
     lea     32(%sp),%sp
     rts
 
-| ---- LOADLOOP_EXIT stub: sweep, then re-emit the displaced `jsr 0x40096a5c` and continue. ----
+| ---- LOADLOOP_EXIT stub: sweep, arm the wave-26 one-shot, then re-emit the displaced call. ----
 commit_hook:
     bsr.b   commit_hi
+    clr.l   aed_pub_done                   | wave 26: re-arm the publish for this load
     jsr     0x40096a5c
     jmp     0x{LOADLOOP_EXIT + 6:x}
+
+| ================= WAVE 26: publish the track's slot BEFORE the AED's first draw ==================
+| P78 caught the ordering directly: after a reload the title formatter 0x4006df74 reads the AED's
+| current-slot global EIGHT times as 0 -- drawing "STATIC 001" and loading slot 1's waveform -- and only
+| afterwards does anything publish the real slot (159, six calls, all correct). Nothing is clamped and
+| nothing overwrites the global; the page is simply drawn before the slot is published. On stock this
+| is invisible because a track on slot 1 makes 0 accidentally right.
+| This is not cosmetic: the editor caches the waveform it loaded, so slices cannot be edited until the
+| slot is re-selected.
+| Fix: on the first title draw after a load, publish the current track's slot exactly the way the OS
+| does it at 0x40083c64 (same globals, same arithmetic, same setter), then let the displaced read run
+| -- so the very first draw already has the right slot. One-shot per load, so a slot the user picks
+| deliberately afterwards (including slot 1) is never overridden.
+aed_pub:
+    lea     -32(%sp),%sp
+    movem.l %d0-%d3/%a0-%a3,(%sp)
+    tst.l   aed_pub_done
+    bne.b   ap_done
+    moveq   #1,%d0
+    move.l  %d0,aed_pub_done
+    movea.l #0x{BANKPTR:x},%a0
+    movea.l (%a0),%a2                      | bank base
+    moveq   #0,%d0
+    move.b  0x{G_PATTERN:x},%d0            | current pattern
+    moveq   #0,%d1
+    move.b  0x{G_TRACK:x},%d1              | current track
+    movea.l %d1,%a1
+    move.l  #6322,%d2
+    muls.l  %d2,%d0                        | pattern * 6322
+    movea.l %a2,%a0
+    adda.l  %d0,%a0
+    adda.l  %a1,%a0
+    adda.l  #0x8eda2,%a0
+    mvs.b   (%a0),%d1                      | machine type for that track (sign-extended, as stock)
+    move.l  %a1,%d3
+    lsl.l   #2,%d3
+    add.l   %a1,%d3                        | track * 5
+    add.l   %d0,%d3                        | + pattern offset
+    adda.l  %d3,%a2
+    adda.l  %d1,%a2                        | + type
+    adda.l  #0x8f04a,%a2
+    moveq   #0,%d0
+    move.b  (%a2),%d0                      | the slot byte (zero-extended: >=128 survives)
+    move.l  %d0,-(%sp)
+    move.l  %d1,-(%sp)
+    jsr     0x4006de34                     | the OS's own (type, slot) publisher
+    addq.l  #8,%sp
+ap_done:
+    movem.l (%sp),%d0-%d3/%a0-%a3
+    lea     32(%sp),%sp
+    movea.l 0x46c8d19c,%a0                 | replicate the displaced read
+    jmp     0x{AED_TITLE + 6:x}
+
+    .align 2
+aed_pub_done:
+    .long   0
 """
     pathlib.Path("out/_ci.s").write_text(asm)
     subprocess.run(["m68k-elf-as", "-mcpu=5407", "-o", "out/_ci.o", "out/_ci.s"], check=True)
@@ -1380,6 +1442,11 @@ def main():
         img[o:o + 6] = b"\x4e\xf9" + cisym["commit_hook"].to_bytes(4, "big")
         print(f"  wave 25: {len(ci)} B @0x{COMMIT_AT:08x}; hook 0x{LOADLOOP_EXIT:08x} -> commit_hook "
               f"@0x{cisym['commit_hook']:08x} (re-commit STRIDE4-B[idx] = STATE@20 for armed high slots)")
+        o = off(AED_TITLE)
+        assert bytes(img[o:o + 6]) == b"\x20\x79\x46\xc8\xd1\x9c", img[o:o + 6].hex()
+        img[o:o + 6] = b"\x4e\xf9" + cisym["aed_pub"].to_bytes(4, "big")
+        print(f"  wave 26: hook 0x{AED_TITLE:08x} -> aed_pub @0x{cisym['aed_pub']:08x} "
+              f"(publish the track's slot before the AED's first draw, once per load)")
 
     # 2d2) Wave 19: extended STATIC allocator -- walk STATE-B after STATE-A (on-device high-slot assign)
     if MIGRATE_ALLOC:
