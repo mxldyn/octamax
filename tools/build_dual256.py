@@ -1314,6 +1314,19 @@ def main():
             img[o:o + len(new)] = new
             print(f"  imm   0x{va-2:08x} {desc}")
 
+    # 3c3) Wave 22 (BUG A -- the reload track->slot revert, nailed by the HW debug watchpoint P63):
+    # the load-time struct validator FUN_40002318 sanitizes each track's sample-slot byte with a SIGNED
+    # test `tstb slot ; bge keep ; clr` -- so any idx>=128 (0x80..0xFF reads as negative) is treated as
+    # invalid and zeroed to 0 (the track reverts to slot 1 on reload). The sample itself persists. Flip
+    # the guard bge->bra so the byte is never cleared (all 0..255 are valid track slots now). Confirmed
+    # site: 0x40002482 (bge.b 0x4000248c -> bra.b), which the watchpoint caught writing 0 to the field.
+    for va, old, new, desc in [(0x40002482, b"\x6c\x08", b"\x60\x08",
+                                "track-slot load validator bge->bra (stop zeroing idx>=128) @0x40002482")]:
+        o = off(va)
+        assert bytes(img[o:o + 2]) == old, f"branch @0x{va:x} = {img[o:o+2].hex()} != {old.hex()}"
+        img[o:o + 2] = new
+        print(f"  fix   0x{va:08x} {desc}")
+
     OUT.write_bytes(bytes(img))
     print(f"\n{OUT}: {len(img):,} bytes")
     print("NEXT: emu-gate ->  python3 tools/emu_check.py out/mainos_dual256.bin")
