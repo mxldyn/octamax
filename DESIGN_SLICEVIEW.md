@@ -1,5 +1,17 @@
 # DESIGN: SLICE PLAYHEAD — a readable SLICES view
 
+> **STATUS: implemented, emulator-green, packaged as OMAX2SV01 — awaiting HW test.**
+> `tools/patch_sliceview.s` + `tools/build_sliceview.py`, integrated as build_all step 5.
+> The periodic-repaint question (§5.1) was answered better than planned: the timer task
+> at `0x40056c40` calls the countdown tick for every type-1 timer message, and the 6-byte
+> `tstl 0x46104ca8` right after that call (`0x40056c92`) is a clean hole that runs even
+> with NO TIMER enabled. The stub posts event 78 (handler `0x40062d04` → `jsr 0x4004581c`
+> = view header+content redraw) to the UI queue — the same post the stock timer task
+> makes — throttled to one outstanding message (flag cleared by the renderer, retried
+> after 64 ticks so a modal can't wedge it). Renderer detours `0x40044cf0` in the SLICES
+> arm; flag off replays the displaced `pea` byte-for-byte. HW will decide the tick rate
+> (blink divider = BLINKCTR bit 3) and the final look.
+
 Replace the 4×16 slice-grid area of the SRC SLICES view (FUNC+[down] → SLICES)
 with: the currently-playing slice number drawn large and blinking, a progress
 bar for playback position inside the slice, and a loop marker when the slice
