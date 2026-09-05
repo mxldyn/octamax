@@ -132,6 +132,9 @@ IO_BUF, IO_BUFSZ = 0x460a8f60, 0x10000
 MODE_W, MODE_R = 0x400b328b, 0x400b3289       # "w" / "r" C strings
 SAVE_HOOK = 0x4008ff44        # 6B: tstl a3(4a8b) beqs+2(6702) jsr a3@(4e93) -> replicate after write
 LOAD_HOOK = 0x4009021a        # 6B: moveml fp@(-576),d2-d6/a2-a4 (4cee1c7cfdc0) -> replicate after read
+BULKLOAD_HOOK = 0x4009083c    # wave 23: bulk STATIC loader prologue. 6B hole (4fefffd4 48d7) SPLITS the
+                              # moveml, so the stub replicates `lea sp@(-44),sp` + the full
+                              # `moveml d2-d7/a2-fp,sp@` and jumps to +8, over the orphan half-word.
 
 # helper VAs are resolved from the assembled ELF symbol table (name -> VA).
 
@@ -898,11 +901,27 @@ sidecar_save:
     jsr     (%a3)
 3:  jmp     0x{SAVE_HOOK + 6:x}
 
-sidecar_load:
-    move.l  %d0,-(%sp)
-    move.l  %d1,-(%sp)
-    move.l  %a0,-(%sp)
-    move.l  %a1,-(%sp)
+| ---- WAVE 23: the restore is now a CALLABLE SUBROUTINE with two entry points, because the RELOAD
+| path and the BOOT path load a project through DIFFERENT functions. P67 proved it: on a power-cycle
+| the project loader 0x4009000c NEVER RUNS (no loader-entry/return/parse events at all -- only the
+| bulk STATIC loader fired), so the LOAD_HOOK sidecar never restored SET-B and every high slot came up
+| EMPTY; worse, a SAVE from that state wrote an empty project.256 -> silent data loss. The bulk STATIC
+| loader 0x4009083c DOES run on both paths, so its prologue is where the restore belongs.
+|   sr_prime          = restore + prime STATE-B (LOAD_HOOK path, runs AFTER the bulk loop: wave 21)
+|   sidecar_restore   = restore only (bulk-loader prologue: the loop itself preps every populated
+|                       slot right after, which is also what should cure the reload-silence)
+| Both entries save EVERY register they touch BEFORE reading the prime flag, so they are safe to call
+| from a function PROLOGUE and from the LOAD_HOOK epilogue (where d0 is the live return value).
+sr_prime:
+    lea     -32(%sp),%sp
+    movem.l %d0-%d3/%a0-%a3,(%sp)
+    moveq   #1,%d3                     | prime STATE-B for each restored slot
+    bra.b   sr_body
+sidecar_restore:
+    lea     -32(%sp),%sp
+    movem.l %d0-%d3/%a0-%a3,(%sp)
+    clr.l   %d3                        | no priming: the bulk load loop does it
+sr_body:
     | (No B-zeroing on load: keep the boot copy-fill so assign-to-128 sees a valid slot struct. A
     | project WITHOUT a project.256 keeps the boot placeholder; the read below overwrites SETTINGS-B
     | when the sidecar exists. Stale-on-project-switch is a known minor follow-up.)
@@ -938,8 +957,8 @@ sidecar_load:
     jsr     0x{IO_CLOSE:x}
     addq.l  #4,%sp
     | skip-empty copy TEMP -> SET-B: overwrite a slot ONLY when the file slot's path[0] != 0, so an
-    | empty/stale project.256 entry does NOT clobber parser-written SET-B. (d2/a2/a3 scratch are
-    | restored by the terminal moveml fp@(-576),d2-d6/a2-a4; d0/d1/a0/a1 by the pops at label 5.)
+    | empty/stale project.256 entry does NOT clobber parser-written SET-B. (Every register used here
+    | is saved/restored by this subroutine's own frame.)
     lea     0x{SIDE_TEMP:x},%a2
     lea     0x{SETB_LO:x},%a3
     move.l  #128,%d2
@@ -951,17 +970,33 @@ sidecar_load:
 7:  move.l  (%a0)+,(%a1)+
     subq.l  #1,%d1
     bne.b   7b
+    tst.l   %d3                        | prime only on the LOAD_HOOK path
+    beq.b   8f
     {PRIME_ASM}
 8:  lea     0x448(%a2),%a2
     lea     0x448(%a3),%a3
     subq.l  #1,%d2
     bne.b   6b
-5:  move.l  (%sp)+,%a1
-    move.l  (%sp)+,%a0
-    move.l  (%sp)+,%d1
-    move.l  (%sp)+,%d0
+5:  movem.l (%sp),%d0-%d3/%a0-%a3
+    lea     32(%sp),%sp
+    rts
+
+| ---- LOAD_HOOK stub (epilogue of the project loader 0x4009000c): restore + prime, then re-emit the
+| displaced moveml verbatim. d0 (the loader's return value) is preserved by the subroutine's frame.
+sidecar_load:
+    bsr.w   sr_prime
     .byte   0x4c,0xee,0x1c,0x7c,0xfd,0xc0     | moveml %fp@(-576),%d2-%d6/%a2-%a4 (verbatim)
     jmp     0x{LOAD_HOOK + 6:x}
+
+| ---- BULK-LOADER prologue stub (0x4009083c): restore SET-B from project.256 BEFORE the load loop
+| walks slots 0..255, so the loop itself opens + preps every populated high slot. This is the path
+| that runs on a POWER-CYCLE auto-load (where 0x4009000c never runs at all). The 6-byte hole splits
+| the moveml, so both displaced instructions are replicated and the orphan half-word is jumped over.
+bulk_restore:
+    bsr.w   sidecar_restore
+    lea     -44(%sp),%sp                      | replicate: lea sp@(-44),sp
+    movem.l %d2-%d7/%a2-%fp,(%sp)             | replicate: moveml d2-d7/a2-fp,sp@
+    jmp     0x{BULKLOAD_HOOK + 8:x}
 
     .align 2
 fmt256:
@@ -1158,6 +1193,14 @@ def main():
         o = off(LOAD_HOOK)
         assert bytes(img[o:o + 6]) == b"\x4c\xee\x1c\x7c\xfd\xc0", img[o:o + 6].hex()
         img[o:o + 6] = b"\x4e\xf9" + scsym["sidecar_load"].to_bytes(4, "big")
+        # WAVE 23 BULK-LOAD hook: the boot auto-load never calls 0x4009000c (P67 HW proof), so the
+        # LOAD_HOOK restore above never runs on a power-cycle. The bulk STATIC loader runs on BOTH
+        # paths -- restore SET-B in its prologue so its own loop preps the high slots.
+        o = off(BULKLOAD_HOOK)
+        assert bytes(img[o:o + 6]) == b"\x4f\xef\xff\xd4\x48\xd7", img[o:o + 6].hex()
+        img[o:o + 6] = b"\x4e\xf9" + scsym["bulk_restore"].to_bytes(4, "big")
+        print(f"  wave 23: bulk-load hook 0x{BULKLOAD_HOOK:08x} -> bulk_restore "
+              f"@0x{scsym['bulk_restore']:08x} (restore before the STATIC load loop; boot path too)")
         print(f"sidecar: {len(sc)} B @0x{SIDECAR_AT:08x}; save-hook 0x{SAVE_HOOK:08x}->0x{scsym['sidecar_save']:08x}"
               f"; load-hook 0x{LOAD_HOOK:08x}->0x{scsym['sidecar_load']:08x}; persists [0x{SETB_LO:08x},0x{SETB_HI:08x})")
 
