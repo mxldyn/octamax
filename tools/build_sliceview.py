@@ -37,6 +37,8 @@ DETOURS = [
     # site,        symbol,      expected original bytes
     (0x40044cf0, "sv_render", "4879400beafa"),   # pea 0x400beafa (the grid bitmap arg)
     (0x40056c92, "sv_tick",   "4ab946104ca8"),   # tstl 0x46104ca8 (after the tick call)
+    (0x400444fc, "sv_led",    "103980000000"),   # moveb 0x80000000 (trig-LED refresher tail)
+    (0x40056f24, "sv_beat",   "4eb940013784"),   # jsr LEDFLASH (the tempo-LED beat arm)
 ]
 
 APPLIED = []   # (addr, bytes) written outside the cave/detours, filled in by main()
@@ -68,7 +70,8 @@ def main():
     blob, syms = assemble("patch_sliceview", CAVE)
     end = CAVE + len(blob)
     print(f"patch_sliceview: {len(blob)} B @ 0x{CAVE:08x} .. 0x{end-1:08x}")
-    for s in ("sv_render", "sv_tick", "lbl_sliceview", "get_sliceview", "set_sliceview", "sv_msg"):
+    for s in ("sv_render", "sv_tick", "sv_led", "sv_beat", "lbl_sliceview", "get_sliceview",
+              "set_sliceview", "sv_msg"):
         print(f"  {s:14s} 0x{syms[s]:08x}")
     if end > CAVE_LIMIT:
         sys.exit(f"blob ends 0x{end:08x}, past the cave limit 0x{CAVE_LIMIT:08x}")

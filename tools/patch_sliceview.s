@@ -58,6 +58,13 @@
     .equ GLYPH_ON,  0x400b5e90
     .equ GLYPH_OFF, 0x400b5e8e
 
+    .equ PAGE,      0x460d16f4      | SLICES page 0..3 (slice = page*16 + trig)
+    .equ LEDSETPAIR,0x400131f4      | (id): set both dies of a bicolor pair
+    .equ LEDBRIGHT2,0x4001360c      | (id, level): brightness of both dies
+    .equ LEDFLASH,  0x40013784      | (id, n): XOR-invert die for n timer ticks (self-flushing)
+    .equ LED_RESUME,  0x40044502    | after the displaced moveb at the refresher tail
+    .equ BEAT_RESUME, 0x40056f2a    | after the displaced tempo-LED jsr
+
 | bar geometry: box x 84..116, y 13..21; interior x 85..115 (31 px), y 14..20
     .equ BAR_X0,  84
     .equ BAR_X1,  116
@@ -253,6 +260,92 @@ sv_post:
 sv_tick_out:
     tst.l   TICK_TSTL               | displaced instruction: flags feed the beq at resume
     jmp     TICK_RESUME
+
+| =============================== trig LED ===============================
+| sv_ledid: d0 = led id (2 * (slice & 15), the red die of the trig's pair) when the
+| feature is live: flag on, SLICES view on screen, this track's voice active, playing a
+| slice, and that slice on the visible page. Otherwise d0 = -1 (N set). Clobbers d0/d1/a0
+| only, so it is callable from both hook contexts below.
+sv_ledid:
+    tst.l   F_SLICEVIEW
+    beq.b   sl_no
+    moveq   #3,%d0
+    cmp.l   VIEW,%d0
+    bne.b   sl_no
+    moveq   #0,%d0
+    move.b  CURTRACK,%d0
+    move.l  %d0,%d1
+    lsl.l   #3,%d0                  | 8t
+    lsl.l   #5,%d1                  | 32t
+    add.l   %d1,%d0                 | 40t
+    lsl.l   #2,%d1                  | 128t
+    add.l   %d1,%d0                 | 168t
+    lea     VOICES,%a0
+    add.l   %d0,%a0
+    tst.b   %a0@(0)                 | voice active?
+    beq.b   sl_no
+    move.b  %a0@(32),%d0
+    extb.l  %d0
+    bmi.b   sl_no                   | no slice
+    move.l  %d0,%d1
+    asr.l   #4,%d1
+    cmp.l   PAGE,%d1                | slice on the visible page?
+    bne.b   sl_no
+    moveq   #15,%d1
+    and.l   %d1,%d0
+    add.l   %d0,%d0                 | led id = 2 * trig
+    rts
+sl_no:
+    moveq   #-1,%d0
+    rts
+
+| sv_led — detour from 0x400444fc, the common tail of the per-view trig-LED refresher
+| 0x40043fdc, after the view arms painted (SLICES: green = slice exists) and before the
+| red playhead overlay. Paints the playing slice's trig AMBER (both dies set, both full
+| brightness) — a combination the SLICES view never uses. The dispatcher flushes after
+| fnA, so no explicit flush. Must preserve d3/d4; driver calls clobber d0/d1/a0/a1 only.
+    .global sv_led
+sv_led:
+    bsr.b   sv_ledid
+    bmi.b   sl_done
+    move.l  %d0,%sp@-               | keep the id across the calls
+    move.l  %d0,%sp@-
+    jsr     LEDSETPAIR              | both dies on
+    addq.l  #4,%sp
+    move.l  %sp@,%d0
+    pea     0xF
+    move.l  %d0,%sp@-
+    jsr     LEDBRIGHT2              | both dies full brightness -> amber
+    addq.l  #8,%sp
+    addq.l  #4,%sp
+sl_done:
+    move.b  0x80000000,%d0          | displaced instruction
+    jmp     LED_RESUME
+
+| sv_beat — detour from 0x40056f24, the once-per-quarter-note arm of the tempo LED
+| (jsr LEDFLASH with (3, 0x26) already stacked). Replaying the jsr from here leaves the
+| stock args at 4(sp), exactly as the original call site did. Then the same inversion
+| pulse, same 3-tick length, on both dies of the playing slice's trig — so it blinks in
+| lockstep with the tempo LED. Only d0/d1/a0/a1 are free here.
+    .global sv_beat
+sv_beat:
+    jsr     LEDFLASH                | displaced: the stock tempo-LED flash
+    bsr.w   sv_ledid
+    bmi.b   sb_done
+    move.l  %d0,%sp@-               | keep the id
+    pea     3
+    move.l  %d0,%sp@-
+    jsr     LEDFLASH
+    addq.l  #8,%sp
+    move.l  %sp@,%d0
+    addq.l  #1,%d0
+    pea     3
+    move.l  %d0,%sp@-
+    jsr     LEDFLASH
+    addq.l  #8,%sp
+    addq.l  #4,%sp
+sb_done:
+    jmp     BEAT_RESUME
 
 | =============================== PERSONALIZE entry ===============================
     .global lbl_sliceview, get_sliceview, set_sliceview

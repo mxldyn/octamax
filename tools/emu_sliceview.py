@@ -35,8 +35,12 @@ CURTRACK = 0x100b14cc
 VOICES   = 0x800049d8
 
 FILLRECT, VLINE, DRAWTEXT, DRAWFMT, POST = 0x40012254, 0x40011b94, 0x40012bd8, 0x40013904, 0x40000c3c
+LEDSETPAIR, LEDBRIGHT2, LEDFLASH = 0x400131f4, 0x4001360c, 0x40013784
 RENDER_SITE, RENDER_RESUME, ARM_EXIT = 0x40044cf0, 0x40044cf6, 0x400453e2
 TICK_SITE, TICK_RESUME = 0x40056c92, 0x40056c98
+LED_SITE, LED_RESUME = 0x400444fc, 0x40044502
+BEAT_SITE, BEAT_RESUME = 0x40056f24, 0x40056f2a
+PAGE = 0x460d16f4
 
 SETTINGS_FAKE = 0x100d5b30          # any RAM address works; use the real STATIC base
 
@@ -63,12 +67,12 @@ def mk():
     calls = []
 
     def hook(uc, addr, size, user):
-        if addr in (FILLRECT, VLINE, DRAWTEXT, DRAWFMT, POST):
+        if addr in (FILLRECT, VLINE, DRAWTEXT, DRAWFMT, POST, LEDSETPAIR, LEDBRIGHT2, LEDFLASH):
             sp = uc.reg_read(UC_M68K_REG_A7)
             args = [struct.unpack(">I", uc.mem_read(sp + 4 + i * 4, 4))[0] for i in range(10)]
             calls.append((addr, args))
 
-    for fn in (FILLRECT, VLINE, DRAWTEXT, DRAWFMT, POST):
+    for fn in (FILLRECT, VLINE, DRAWTEXT, DRAWFMT, POST, LEDSETPAIR, LEDBRIGHT2, LEDFLASH):
         uc.mem_write(fn, b"\x4e\x75")    # rts
     uc.hook_add(UC_HOOK_CODE, hook)
     return uc, calls
@@ -242,6 +246,67 @@ check("modal open: no post", not posts)
 uc, _ = mk()
 msg = uc.mem_read(NM["sv_msg"], 8)
 check("sv_msg is event 78", msg[0] == 78 and all(b == 0 for b in msg[1:]))
+
+# ---------------- trig LED: amber override at the refresher tail ----------------
+def run_led(site, resume, **voice_kw):
+    uc, calls = mk()
+    w32(uc, F_FLAG, voice_kw.pop("flag", 1))
+    w32(uc, VIEW, voice_kw.pop("view", 3))
+    w32(uc, PAGE, voice_kw.pop("page", 0))
+    if voice_kw:
+        setup_voice(uc, **voice_kw)
+    uc.reg_write(UC_M68K_REG_A7, sp0)
+    uc.reg_write(UC_M68K_REG_D3, 0x1111)      # live at the LED site: must survive
+    uc.reg_write(UC_M68K_REG_D4, 0x2222)
+    pc = run_to(uc, site, {resume})
+    return uc, pc, calls
+
+print("trig LED")
+# slice 21 (0-based) = page 1, trig 5 -> led id 10
+uc, pc, calls = run_led(LED_SITE, LED_RESUME, page=1,
+                        track=2, active=True, slice_idx=21, pos=0, start=0, end=100, loop=-1 & 0xFFFFFFFF)
+check("resumes after the displaced moveb", pc == LED_RESUME)
+check("d3/d4 preserved", uc.reg_read(UC_M68K_REG_D3) == 0x1111 and
+      uc.reg_read(UC_M68K_REG_D4) == 0x2222)
+check("amber: pair set + both dies bright", [(f, a[0], a[1]) for f, a in calls] ==
+      [(LEDSETPAIR, 10, 10), (LEDBRIGHT2, 10, 0xF)], str([(hex(f), a[:2]) for f, a in calls]))
+check("sp balanced", uc.reg_read(UC_M68K_REG_A7) == sp0)
+uc, pc, calls = run_led(LED_SITE, LED_RESUME, page=0,
+                        track=2, active=True, slice_idx=21, pos=0, start=0, end=100, loop=-1 & 0xFFFFFFFF)
+check("other page: no LED calls", pc == LED_RESUME and not calls)
+uc, pc, calls = run_led(LED_SITE, LED_RESUME, view=2,
+                        track=2, active=True, slice_idx=5, pos=0, start=0, end=100, loop=-1 & 0xFFFFFFFF)
+check("other view: no LED calls", pc == LED_RESUME and not calls)
+uc, pc, calls = run_led(LED_SITE, LED_RESUME, flag=0,
+                        track=2, active=True, slice_idx=5, pos=0, start=0, end=100, loop=-1 & 0xFFFFFFFF)
+check("flag off: no LED calls", pc == LED_RESUME and not calls)
+uc, pc, calls = run_led(LED_SITE, LED_RESUME,
+                        track=2, active=False, slice_idx=5, pos=0, start=0, end=100, loop=-1 & 0xFFFFFFFF)
+check("idle voice: no LED calls", pc == LED_RESUME and not calls)
+
+# ---------------- trig LED: beat pulse rides the tempo-LED arm ----------------
+print("beat pulse")
+uc, calls = mk()
+w32(uc, F_FLAG, 1); w32(uc, VIEW, 3); w32(uc, PAGE, 0)
+setup_voice(uc, track=0, active=True, slice_idx=7, pos=0, start=0, end=100, loop=-1 & 0xFFFFFFFF)
+# the beat site sits after the stock push of (3, 0x26)
+uc.reg_write(UC_M68K_REG_A7, sp0 - 8)
+w32(uc, sp0 - 8, 0x26); w32(uc, sp0 - 4, 3)
+pc = run_to(uc, BEAT_SITE, {BEAT_RESUME})
+fl = [a[:2] for f, a in calls if f == LEDFLASH]
+check("resumes into the stock cleanup", pc == BEAT_RESUME)
+check("tempo LED still flashed, then both dies of trig 8 (id 14)",
+      fl == [[0x26, 3], [14, 3], [15, 3]], str(fl))
+check("stock args still on top for the caller's pop",
+      uc.reg_read(UC_M68K_REG_A7) == sp0 - 8 and r32(uc, sp0 - 8) == 0x26)
+uc, calls = mk()
+w32(uc, F_FLAG, 1); w32(uc, VIEW, 2); w32(uc, PAGE, 0)
+setup_voice(uc, track=0, active=True, slice_idx=7, pos=0, start=0, end=100, loop=-1 & 0xFFFFFFFF)
+uc.reg_write(UC_M68K_REG_A7, sp0 - 8)
+w32(uc, sp0 - 8, 0x26); w32(uc, sp0 - 4, 3)
+pc = run_to(uc, BEAT_SITE, {BEAT_RESUME})
+fl = [a[:2] for f, a in calls if f == LEDFLASH]
+check("other view: only the stock tempo flash", pc == BEAT_RESUME and fl == [[0x26, 3]], str(fl))
 
 # ---------------- menu getter/setter ----------------
 print("menu")
