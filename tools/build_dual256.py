@@ -132,6 +132,9 @@ IO_BUF, IO_BUFSZ = 0x460a8f60, 0x10000
 MODE_W, MODE_R = 0x400b328b, 0x400b3289       # "w" / "r" C strings
 SAVE_HOOK = 0x4008ff44        # 6B: tstl a3(4a8b) beqs+2(6702) jsr a3@(4e93) -> replicate after write
 LOAD_HOOK = 0x4009021a        # 6B: moveml fp@(-576),d2-d6/a2-a4 (4cee1c7cfdc0) -> replicate after read
+BOOTLOAD_HOOK = 0x40090002    # wave 24: epilogue of the BOOT project loader 0x4008ff58 (called from
+                              # 0x400852a2; it owns the third parser call 0x4008ffda). A power-cycle
+                              # uses THIS loader, not 0x4009000c. 6B hole: moveml fp@(-300),d2-d3/a2-a3.
 BULKLOAD_HOOK = 0x4009083c    # wave 23: bulk STATIC loader prologue. 6B hole (4fefffd4 48d7) SPLITS the
                               # moveml, so the stub replicates `lea sp@(-44),sp` + the full
                               # `moveml d2-d7/a2-fp,sp@` and jumps to +8, over the orphan half-word.
@@ -981,12 +984,57 @@ sr_body:
     lea     32(%sp),%sp
     rts
 
+| ---- WAVE 24: prime EVERY populated-but-unprimed high slot, driven by SET-B itself rather than by
+| what a particular load path happened to copy. P70 showed why this is needed: on a power-cycle the
+| bulk STATIC load loop finishes with STATE-B[31]@16 = 0 and no high-slot sampleview call at all
+| (tag7=0 twice, zero tag2), because the BOOT loader 0x4008ff58 parses project.work -- and so fills
+| SET-B -- only AFTER those loops have already run. The slot's name therefore appears while its voice
+| is never armed: silent until the AED is opened, which is exactly what sampleview does.
+| Idempotent: a slot with @16 != 0 is skipped, so calling this on every load path costs nothing.
+| sampleview preserves d2-d7/a2-a4 across the call, and this routine saves everything it uses anyway.
+prime_hi:
+    lea     -32(%sp),%sp
+    movem.l %d0-%d3/%a0-%a3,(%sp)
+    lea     0x{SET_B:x},%a2                | SETTINGS-B[0]
+    lea     0x{ST_B:x},%a3                 | STATE-B[0]
+    move.l  #128,%d2                       | slots left
+    move.l  #128,%d3                       | idx
+ph_loop:
+    tst.b   (%a2)                          | empty path -> nothing to arm
+    beq.b   ph_next
+    tst.l   16(%a3)                        | already primed -> leave it alone
+    bne.b   ph_next
+    pea     0x1                            | same args the bulk load loop uses @0x400908a2
+    move.l  %d3,-(%sp)
+    jsr     0x40093980                     | sampleview: sets STATE @8/@16/@36 + streaming
+    addq.l  #8,%sp
+ph_next:
+    lea     0x448(%a2),%a2
+    lea     44(%a3),%a3
+    addq.l  #1,%d3
+    subq.l  #1,%d2
+    bne.b   ph_loop
+    movem.l (%sp),%d0-%d3/%a0-%a3
+    lea     32(%sp),%sp
+    rts
+
 | ---- LOAD_HOOK stub (epilogue of the project loader 0x4009000c): restore + prime, then re-emit the
 | displaced moveml verbatim. d0 (the loader's return value) is preserved by the subroutine's frame.
 sidecar_load:
     bsr.w   sr_prime
+    bsr.w   prime_hi                          | catch anything the copy loop did not arm
     .byte   0x4c,0xee,0x1c,0x7c,0xfd,0xc0     | moveml %fp@(-576),%d2-%d6/%a2-%a4 (verbatim)
     jmp     0x{LOAD_HOOK + 6:x}
+
+| ---- BOOT-LOADER epilogue stub (0x40090002, the tail of 0x4008ff58): this is the loader a POWER-CYCLE
+| uses -- 0x4009000c never runs then (P67), so neither did any restore or priming. Restore SET-B from
+| project.256 (slices and per-slot settings), then arm every populated high slot. d0 already holds the
+| return value here (set at 0x40090000) and both subroutines preserve it.
+bootload_done:
+    bsr.w   sidecar_restore
+    bsr.w   prime_hi
+    .byte   0x4c,0xee,0x0c,0x0c,0xfe,0xd4     | moveml %fp@(-300),%d2-%d3/%a2-%a3 (verbatim)
+    jmp     0x{BOOTLOAD_HOOK + 6:x}
 
 | ---- BULK-LOADER prologue stub (0x4009083c): restore SET-B from project.256 BEFORE the load loop
 | walks slots 0..255, so the loop itself opens + preps every populated high slot. This is the path
@@ -1201,6 +1249,15 @@ def main():
         img[o:o + 6] = b"\x4e\xf9" + scsym["bulk_restore"].to_bytes(4, "big")
         print(f"  wave 23: bulk-load hook 0x{BULKLOAD_HOOK:08x} -> bulk_restore "
               f"@0x{scsym['bulk_restore']:08x} (restore before the STATIC load loop; boot path too)")
+        # WAVE 24 BOOT-LOADER hook: a power-cycle loads the project through 0x4008ff58, whose parser
+        # fills SET-B only AFTER the bulk load loops have run -- so the high slots were never armed
+        # (P70: loop exits with @16=0 and no high-slot sampleview). Restore + prime at its epilogue.
+        o = off(BOOTLOAD_HOOK)
+        assert bytes(img[o:o + 6]) == b"\x4c\xee\x0c\x0c\xfe\xd4", img[o:o + 6].hex()
+        img[o:o + 6] = b"\x4e\xf9" + scsym["bootload_done"].to_bytes(4, "big")
+        print(f"  wave 24: boot-load hook 0x{BOOTLOAD_HOOK:08x} -> bootload_done "
+              f"@0x{scsym['bootload_done']:08x}; prime_hi @0x{scsym['prime_hi']:08x} "
+              f"(arm every populated high slot on BOTH load paths)")
         print(f"sidecar: {len(sc)} B @0x{SIDECAR_AT:08x}; save-hook 0x{SAVE_HOOK:08x}->0x{scsym['sidecar_save']:08x}"
               f"; load-hook 0x{LOAD_HOOK:08x}->0x{scsym['sidecar_load']:08x}; persists [0x{SETB_LO:08x},0x{SETB_HI:08x})")
 

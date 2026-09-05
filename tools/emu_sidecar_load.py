@@ -74,7 +74,11 @@ def run(mode, file_bytes, entry="load"):
         elif address == IO_CLOSE:
             ret_with(0)
         elif address == SAMPLEVIEW:
-            state["primed"].append(int.from_bytes(mu.mem_read(sp + 4, 4), "big"))
+            slot = int.from_bytes(mu.mem_read(sp + 4, 4), "big")
+            state["primed"].append(slot)
+            if slot >= 128:                     # the real one always writes @16 (>=64) at 0x40093c92;
+                mu.mem_write(bd.ST_B + (slot - 128) * bd.ST_STRIDE + 16,   # model that, so the wave-24
+                             (0x300).to_bytes(4, "big"))                   # sweep correctly skips it
             ret_with(1)
 
     for f in (DIR_OF, IO_SPRINTF, IO_OPEN, IO_READ, IO_CLOSE, SAMPLEVIEW):
@@ -136,8 +140,9 @@ def main():
     e, ce, _ = run("missing", b"", entry="bulk")
     print(f"  (D) project.256 populated -> SET-B[0]@0 = {d!r}   regs+frame: {'OK' if not cd else cd}")
     print(f"  (E) project.256 missing   -> SET-B[0]@0 = {e!r}   regs+frame: {'OK' if not ce else ce}")
-    print(f"      priming: LOAD path primed slots {pa} (wave 21) | BULK path primed {pd} "
-          f"(none by design -- the load loop it precedes preps every populated slot itself)")
+    print(f"      priming: LOAD path primed slots {pa} (wave 21 copy-loop + the wave-24 sweep, which "
+          f"skips slots already armed) | BULK path primed {pd} (none by design -- the load loop it "
+          f"precedes preps every populated slot itself)")
     okD = d == b"RESTORED.wav" and not cd and pd == [] and pa == [128]
     okE = e == b"PARSER.wav" and not ce
     okA = okA and not ca
