@@ -1,10 +1,10 @@
 | patch_sliceview — SLICE PLAYHEAD: a readable SRC>SLICES view.
 |
-|   SLICE PLAYHEAD   0x800000dc   big blinking slice number + progress bar + loop marker
+|   SLICE PLAYHEAD   0x800000dc   big slice number + progress bar + loop marker
 |
 | Replaces the 4x16 slice-grid area (x 61..117, y 10..24) of the FUNC+[down] SLICES view
-| with: the currently-playing slice number in the 12 px font (blinking while the voice is
-| active), a progress bar for the playback position inside the slice, and an XOR vline
+| with: the currently-playing slice number in the 12 px font (centred on x=72), a
+| progress bar for the playback position inside the slice, and an XOR vline
 | marking the slice's loop point when one is configured. Flag cleared (default) = the
 | stock grid, byte for byte.
 |
@@ -31,7 +31,7 @@
 
     .equ F_SLICEVIEW, 0x800000dc    | free word in the battery-backed PERSONALIZE block
 
-    .equ BLINKCTR,  0x80006c68      | long: timer ticks (blink phase = bit 3)
+    .equ BLINKCTR,  0x80006c68      | long: timer ticks (paces the post retry)
     .equ POSTED,    0x80006c6c      | byte: one redraw message outstanding
     .equ POSTTIME,  0x80006c70      | long: BLINKCTR at last post, for the retry
 
@@ -187,40 +187,38 @@ sv_marker:
     jsr     VLINE
     lea     %sp@(20),%sp
 
-| ---- the number, blinking on BLINKCTR bit 3 ----
+| ---- the number, centred on the middle of its zone (x 61..83 -> 72) ----
 sv_number:
-    move.l  BLINKCTR,%d0
-    btst    #3,%d0
-    bne.b   sv_out                  | off phase of the blink
     tst.l   %d3
-    bmi.b   sv_dashes               | no slice selected: steady "--" instead
+    bmi.b   sv_dashes               | no slice selected: "--" instead
     move.l  %d3,%d0
     addq.l  #1,%d0                  | display 1-based
     move.l  %d0,%sp@-
     pea     sv_fmt
     pea     sv_meas
     pea     1                       | mode: set
-    clr.l   %sp@-                   | align: left
+    pea     1                       | align: centred on x
     pea     12                      | y
-    pea     63                      | x
+    pea     72                      | x
     pea     SURF
     pea     FONT12
     jsr     DRAWFMT
     lea     %sp@(36),%sp
-sv_out:
     jmp     ARM_EXIT                | dirty flag + epilogue restore d2-d7/a2-fp
 
 sv_idle:
     moveq   #0,%d3                  | fall into the dashes with no bar drawn
 sv_dashes:
     pea     sv_dash
+    pea     sv_dash                 | its own measure template
     pea     1
+    pea     1                       | centred, same anchor as the number
     pea     12
-    pea     63
+    pea     72
     pea     SURF
     pea     FONT12
-    jsr     DRAWTEXT
-    lea     %sp@(24),%sp
+    jsr     DRAWFMT
+    lea     %sp@(32),%sp
     jmp     ARM_EXIT
 
 | =============================== tick ===============================

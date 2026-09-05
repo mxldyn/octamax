@@ -161,21 +161,22 @@ vl = [a for f, a in calls if f == VLINE]
 check("loop marker vline", len(vl) == 1 and vl[0][1:4] == [92, 12, 22] and
       vl[0][4] == 0xFFFFFFFF, str(vl))
 fmt = [a for f, a in calls if f == DRAWFMT]
-check("number drawn: font12 at (63,12), value 11",
-      len(fmt) == 1 and fmt[0][0] == 0x400ba89e and fmt[0][2:6] == [63, 12, 0, 1]
+check("number drawn: font12 centred at (72,12), value 11",
+      len(fmt) == 1 and fmt[0][0] == 0x400ba89e and fmt[0][2:6] == [72, 12, 1, 1]
       and fmt[0][8] == 11, str(fmt))
-check("no drawtext (dashes) on the playing path", not any(f == DRAWTEXT for f, _ in calls))
+check("no dashes on the playing path", fmt[0][7] == NM["sv_fmt"])
 
-# ---------------- render: blink-off phase hides the number ----------------
-print("render, flag ON: blink-off phase")
+# ---------------- render: number steady regardless of the tick counter ----------------
+print("render, flag ON: number steady, no loop")
 uc, calls = mk()
 w32(uc, F_FLAG, 1)
-w32(uc, BLINKCTR, 8)                            # bit 3 set -> number hidden
+w32(uc, BLINKCTR, 8)                            # any phase: the number no longer blinks
 setup_voice(uc, track=0, active=True, slice_idx=3, pos=100, start=0, end=400, loop=0xFFFFFFFF)
 uc.reg_write(UC_M68K_REG_A7, sp0 - 12)
 pc = run_to(uc, RENDER_SITE, {RENDER_RESUME, ARM_EXIT})
 check("exits via the arm tail", pc == ARM_EXIT)
-check("no number, no dashes", not any(f in (DRAWFMT, DRAWTEXT) for f, _ in calls))
+fmt = [a for f, a in calls if f == DRAWFMT]
+check("number drawn steady (value 4)", len(fmt) == 1 and fmt[0][8] == 4, str(fmt))
 check("no loop marker when loop = -1", not any(f == VLINE for f, _ in calls))
 # pos 100/400 -> 100*31/400 = 7 -> fill 85..91
 fills = [a for f, a in calls if f == FILLRECT]
@@ -189,9 +190,9 @@ setup_voice(uc, track=5, active=False, slice_idx=0, pos=0, start=0, end=100, loo
 uc.reg_write(UC_M68K_REG_A7, sp0 - 12)
 pc = run_to(uc, RENDER_SITE, {RENDER_RESUME, ARM_EXIT})
 check("exits via the arm tail", pc == ARM_EXIT)
-txt = [a for f, a in calls if f == DRAWTEXT]
-check("steady dashes", len(txt) == 1 and txt[0][0] == 0x400ba89e and txt[0][2:5] == [63, 12, 1],
-      str(txt))
+txt = [a for f, a in calls if f == DRAWFMT]
+check("centred dashes", len(txt) == 1 and txt[0][0] == 0x400ba89e and txt[0][2:6] == [72, 12, 1, 1]
+      and txt[0][7] == NM["sv_dash"], str(txt))
 check("only the area clear otherwise", len([1 for f, _ in calls if f == FILLRECT]) == 1)
 
 # ---------------- render: whole-sample (slice -1) uses the trim triple ----------------
@@ -206,8 +207,8 @@ check("exits via the arm tail", pc == ARM_EXIT)
 fills = [a for f, a in calls if f == FILLRECT]
 check("bar from the trim triple: 250*31/1000 = 7 -> 85..91",
       len(fills) == 4 and fills[3][1:6] == [85, 14, 91, 20, 1], str(fills))
-txt = [a for f, a in calls if f == DRAWTEXT]
-check("dashes instead of a number", len(txt) == 1 and not any(f == DRAWFMT for f, _ in calls))
+txt = [a for f, a in calls if f == DRAWFMT]
+check("dashes instead of a number", len(txt) == 1 and txt[0][7] == NM["sv_dash"], str(txt))
 
 # ---------------- tick paths ----------------
 def run_tick(flag, view, modal, posted, blink, posttime):
