@@ -26,6 +26,16 @@ detours are read back out of the finished image and compared byte for byte, so a
 grows into someone else's block fails the build instead of the unit.
 
     python3 tools/build_all.py            # -> out/mainos_all.bin
+
+Packaging (the release is branded OCTAMAX_2; the ELEK version field holds 10 chars):
+
+    EFT_EMIT_CONTAINER=out/elek_octamax2.bin elektron-firmware-tool \
+        -i downloads/extracted/OCTATRACK_OS1.40C.syx -c 3 out/mainos_all.bin \
+        -V OCTAMAX_2 -o out/OCTAMAX_2.syx
+    python3 tools/make_bin.py out/elek_octamax2.bin -o out/OCTAMAX_2.bin --expect-version OCTAMAX_2
+
+Boot splash and SYSTEM STATUS -> OS VERSION then read OCTAMAX_2 instead of the r10 build's
+MAXOLYDIAN, so the combined image is identifiable on the unit.
 """
 import json, pathlib, subprocess, sys
 
