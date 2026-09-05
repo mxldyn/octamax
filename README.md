@@ -32,6 +32,36 @@ that copy.
 
 ---
 
+## Version 2.0 BETA
+
+> **BETA — expect bugs.** This build is new and has been tested on one MKII unit. Keep
+> your official `.syx` at hand: `[FUNC]` + power on → `[TRIG 3]` recovers the unit even
+> if the OS is corrupt, because the bootloader is never touched. Your CF card, projects
+> and samples are not affected by flashing.
+
+### What's new
+
+**STATIC sample slots go from 128 to 256.** Slots 129–256 behave like the stock ones:
+they load samples, keep their slice grids (including `.ot` sidecar files), are assignable
+to tracks, accept parameter locks, survive a project save/reload **and a power cycle**,
+and play on the first trig. FLEX slots and the recorder buffers are untouched.
+
+Persistence uses the native `project.work` (which gains `SLOT=129..256` records) plus a
+`project.256` sidecar file next to your project. A project saved with high slots still
+opens on stock firmware — those slots simply come back empty.
+
+Known limitations, and the reverse-engineering story behind each fix, are in
+[`DUAL256.md`](DUAL256.md). The short version: the **LOCK TRIG popup still stops at 128**,
+so to author locks on a high slot, select it on the track first and then place trigs.
+
+Everything from 1.x is still here and still **off by default** (lazy transitions, the
+BANK/PTN countdown switch, the extra arp scales). The unit reports `OCTAMAX_2` in the boot
+splash and under SYSTEM STATUS → OS VERSION.
+
+**[How to build your flashable file →](#1-the-fast-path--apply-the-pre-built-patch)**
+
+---
+
 ## Motivation
 
 > Hi, I'm **Maxolydian**, an electronic artist based in Palermo, Italy.
@@ -162,14 +192,16 @@ freshly flashed unit is indistinguishable from stock until you opt in:
 | **No BANK/PTN countdown** | The SELECT BANK / SELECT PATTERN windows stop expiring after four seconds. |
 | **Arp key scales** | The MIDI arpeggiator's key-scale (ARP SETUP, F knob) gains 10 extra qualities beyond the stock major/minor: the five Greek modes (Dorian, Phrygian, Lydian, Mixolydian, Locrian) plus blues, phrygian-dominant, melodic-minor, octatonic and hirajoshi — 12 qualities × 12 roots. `OFF`/`maj`/`min` stay byte-identical to stock, so the extra scales only appear if you scroll the F knob past them. |
 | **PERSONALIZE options** | The two behavior switches (lazy transitions, no countdown), added to the PERSONALIZE menu, unchecked by default. |
-| **Boot branding** | Boot splash and SYSTEM STATUS show `MAXOLYDIAN` instead of `1.40C`. |
+| **256 STATIC slots** | *(new in 2.0)* Sample slots 129–256, with slices, track assignment, parameter locks and persistence across a power cycle. Always on — it extends capacity rather than changing behaviour. Written up in [`DUAL256.md`](DUAL256.md). |
+| **Boot branding** | Boot splash and SYSTEM STATUS show `OCTAMAX_2` instead of `1.40C`. |
 
-A separate, larger patch raises the **STATIC sample slots from 128 to 256** — high slots load
-samples, keep their slices, are assignable to tracks, accept parameter locks, survive a save/reload
-and a power cycle, and play immediately. It is built by its own tools and written up in
-[`DUAL256.md`](DUAL256.md).
+The behaviour switches are the ones that stay off until you opt in; the extra arp scales only
+appear if you scroll past `OFF`/`maj`/`min`, and the extra slots simply exist.
 
-The code changes live in a free code cave and are reached by 6-byte jump detours.
+The code changes live in a free code cave and are reached by 6-byte jump detours. All three
+feature sets were developed against that same cave, so [`tools/build_all.py`](tools/build_all.py)
+relocates their stubs around each other and then reads every block back out of the finished image
+to prove nothing was overwritten.
 The arp-scales work is written up in [`NOTES.md`](NOTES.md) (search "ARP key-scale");
 the behavior patches have a per-hunk table in [`sysex/README.md`](sysex/README.md).
 
@@ -215,27 +247,52 @@ the same stock file it emits a `.syx` byte-identical to the reference build.
 
 ### 1. The fast path — apply the pre-built patch
 
-The 1,175 bytes of ColdFire code are already assembled and captured, hunk by
-hunk, in `sysex/patches/maxolydian-r10.json` (each hunk carries its load address,
-the original bytes it expects, and the replacement bytes). To produce a `.syx`:
+**No firmware is distributed here, so there is nothing to download and flash directly.**
+What the repository ships is the patch: the ColdFire code authored in this project,
+captured hunk by hunk in `sysex/patches/`, where each hunk carries its load address, the
+original bytes it expects and the replacement bytes. You apply it to *your own* copy of
+the official OS, and the result is byte-identical to the reference build.
+
+Three commands, from a clean clone:
 
 ```sh
+./fetch-os.sh          # downloads the official OS 1.40C from elektron.se into downloads/
+./setup.sh             # builds elektron-firmware-tool into vendor/
+
 python3 sysex/apply_patch.py \
     -i downloads/extracted/OCTATRACK_OS1.40C.syx \
-    -o OCTATRACK_MAXOLYDIAN.syx
+    -p sysex/patches/octamax-2.0-beta.json \
+    -o OCTAMAX_2.syx --bin OCTAMAX_2.bin
 ```
 
 ```
+patch  : octamax-2.0-beta 2.0-BETA
+target : Elektron Octatrack MKII OS 1.40C
+
 [1/5] stock .syx checksum ok
 [2/5] extracted section_3_MAIN_OS.bin (1,112,560 bytes)
-[3/5] applied 22 hunks (1175 bytes)
-[4/5] repacked -> OCTATRACK_MAXOLYDIAN.syx
+[3/5] applied 223 hunks (4587 bytes)
+[4/5] repacked -> OCTAMAX_2.syx
+      CF image  -> OCTAMAX_2.bin
 [5/5] output checksum ok — byte-identical to the reference build
 ```
 
+That gives you both flashable files:
+
+| file | how you flash it |
+|---|---|
+| `OCTAMAX_2.bin` | copy to the **root of the CF card**, then **PROJECT → OS UPGRADE → [YES]**. Fast, and what most people want. |
+| `OCTAMAX_2.syx` | send over **MIDI DIN** (not USB). Takes several minutes. |
+
+`--bin` is optional; without it only the `.syx` is written. To build the older
+behaviour-only 1.x patch instead, drop `-p` (it defaults to
+`sysex/patches/maxolydian-r10.json`).
+
 The script **aborts before writing anything** if the stock checksum is wrong, if
 the original bytes under any hunk don't match (wrong firmware, or already
-patched), or if the patched image's checksum is off.
+patched), or if the patched image's checksum is off. The final line confirms your
+output matches the reference build bit for bit — if it does, you built exactly what
+was tested.
 
 ### 2. The full path — rebuild the stubs from source
 
