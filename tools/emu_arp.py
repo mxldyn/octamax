@@ -12,8 +12,11 @@ from unicorn import *
 from unicorn.m68k_const import *
 
 import subprocess
-ARP_AT = 0x400d7000
+# The blob's load address comes from the ELF, not a constant: tools/build_all.py relocates the arp
+# cave to fit alongside the maxolydian and dual-256 stubs, and this gate must follow it.
 BLOB = pathlib.Path("out/patch_arp.bin").read_bytes()
+_hdr = subprocess.run(["m68k-elf-objdump", "-h", "out/patch_arp.elf"], capture_output=True, text=True).stdout
+ARP_AT = next(int(l.split()[3], 16) for l in _hdr.splitlines() if " .text " in l)
 _nm = subprocess.run(["m68k-elf-nm", "out/patch_arp.elf"], capture_output=True, text=True).stdout
 _sym = {p[2]: int(p[0], 16) for p in (l.split() for l in _nm.splitlines()) if len(p) == 3}
 DECODE, LOOKUP = _sym["decode_cave"], _sym["lookup_cave"]

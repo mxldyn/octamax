@@ -65,6 +65,8 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("container", help="ELEK container (EFT_EMIT_CONTAINER output)")
+    ap.add_argument("--expect-version", default=None,
+                    help="fail unless the container's 10-char version field is exactly this")
     ap.add_argument("-o", "--out", required=True, help="output .bin")
     ap.add_argument("--seed", type=lambda s: int(s, 0), default=DEFAULT_SEED)
     args = ap.parse_args()
@@ -78,7 +80,20 @@ def main():
     if pad:
         payload += b"\x00" * pad
     words = list(struct.unpack(f">{len(payload)//4}I", payload))
+    tag = elek[8:18].decode("ascii", "replace")
     print(f"container : {len(elek):,} bytes  ({elek[:18].decode('ascii', 'replace')})")
+    # The elektron-firmware-tool version field is EXACTLY 10 chars. A longer -V is silently DROPPED and
+    # the base container's version survives, so the device reports e.g. STOCK140C while running a patched
+    # payload -- indistinguishable on the unit, and it breaks the one-unique-name-per-flash rule. The
+    # payload itself is unaffected (verified: only the 10 version bytes differ), but refuse to emit an
+    # unlabelled image rather than let it reach the CF.
+    STOCK_TAGS = ("1.40C", "R0178")          # what survives when -V is dropped
+    if any(tag.strip().startswith(s) for s in STOCK_TAGS) or not tag.strip():
+        sys.exit(f"REFUSING: container version is {tag!r} -- that is the stock/base tag, so the -V string "
+                 f"passed to elektron-firmware-tool was dropped (it must be 10 chars or fewer). The unit "
+                 f"would report stock while running a patched payload. Re-run with a shorter -V.")
+    if args.expect_version and tag.strip() != args.expect_version:
+        sys.exit(f"REFUSING: container version is {tag!r}, expected {args.expect_version!r}.")
     print(f"payload   : {len(payload):,} bytes"
           + (f"  (+{pad} pad bytes to a word boundary)" if pad else ""))
 

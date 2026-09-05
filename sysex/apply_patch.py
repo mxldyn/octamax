@@ -6,7 +6,11 @@ No Elektron binary is distributed with this repository. You supply the stock .sy
 (downloaded from elektron.se); this script applies the patch hunks — which are the
 only part authored here — and repacks the result.
 
-    python3 sysex/apply_patch.py -i OCTATRACK_OS1.40C.syx -o OCTATRACK_MAXOLYDIAN.syx
+    python3 sysex/apply_patch.py -i OCTATRACK_OS1.40C.syx -o OCTAMAX_2.syx \\
+        -p sysex/patches/octamax-2.0-beta.json --bin OCTAMAX_2.bin
+
+`--bin` additionally writes the CF-card image for PROJECT -> OS UPGRADE, which is much
+faster than flashing over MIDI. Omit `-p` to build the older behaviour-only r10 patch.
 
 Every step is verified: the stock file's checksum, the original bytes under each
 hunk, and the checksum of the produced .syx. Any mismatch aborts before writing.
@@ -50,8 +54,9 @@ def find_tool(override):
     )
 
 
-def run(cmd):
-    p = subprocess.run(cmd, capture_output=True, text=True)
+def run(cmd, env=None):
+    p = subprocess.run(cmd, capture_output=True, text=True,
+                       env=({**os.environ, **env} if env else None))
     if p.returncode != 0:
         die(f"{cmd[0]} failed:\n{p.stdout}{p.stderr}")
     return p.stdout
@@ -64,6 +69,8 @@ def main():
     ap.add_argument("-o", "--output", required=True, help="patched .syx to write")
     ap.add_argument("-p", "--patch", default=DEFAULT_PATCH, help="patch definition JSON")
     ap.add_argument("--tool", help="path to elektron-firmware-tool")
+    ap.add_argument("--bin", metavar="FILE",
+                    help="also write a CF-card .bin for PROJECT -> OS UPGRADE (much faster than MIDI)")
     ap.add_argument("--force", action="store_true",
                     help="continue even if the stock .syx checksum differs (NOT recommended)")
     args = ap.parse_args()
@@ -125,9 +132,20 @@ def main():
         patched.write_bytes(data)
 
         # --- 4. repack --------------------------------------------------------------
+        # The CF .bin wraps the very same container the .syx is built from, so ask the tool to
+        # emit it and let tools/make_bin.py wrap it -- no second pass over the firmware.
+        container = tmp / "elek_container.bin"
         run([tool, "-i", args.input, "-c", str(tgt["section"]), str(patched),
-             "-V", patch["display_version"], "-o", args.output])
+             "-V", patch["display_version"], "-o", args.output],
+            env={"EFT_EMIT_CONTAINER": str(container)})
         print(f"[4/5] repacked -> {args.output}")
+        if args.bin:
+            if not container.exists():
+                die("the firmware tool did not emit a container; your build may predate the "
+                    "EFT_EMIT_CONTAINER patch (see setup.sh)")
+            run([sys.executable, str(ROOT / "tools" / "make_bin.py"), str(container),
+                 "-o", args.bin, "--expect-version", patch["display_version"]])
+            print(f"      CF image  -> {args.bin}")
 
     # --- 5. verify the result -------------------------------------------------------
     out = sha256(args.output)
