@@ -164,6 +164,11 @@ freshly flashed unit is indistinguishable from stock until you opt in:
 | **PERSONALIZE options** | The two behavior switches (lazy transitions, no countdown), added to the PERSONALIZE menu, unchecked by default. |
 | **Boot branding** | Boot splash and SYSTEM STATUS show `MAXOLYDIAN` instead of `1.40C`. |
 
+A separate, larger patch raises the **STATIC sample slots from 128 to 256** — high slots load
+samples, keep their slices, are assignable to tracks, accept parameter locks, survive a save/reload
+and a power cycle, and play immediately. It is built by its own tools and written up in
+[`DUAL256.md`](DUAL256.md).
+
 The code changes live in a free code cave and are reached by 6-byte jump detours.
 The arp-scales work is written up in [`NOTES.md`](NOTES.md) (search "ARP key-scale");
 the behavior patches have a per-hunk table in [`sysex/README.md`](sysex/README.md).
