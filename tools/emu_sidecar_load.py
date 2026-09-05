@@ -19,7 +19,9 @@ sys.path.insert(0, "tools")
 import build_dual256 as bd
 
 BASE = 0x40000400
-IMG = bytes(pathlib.Path("out/mainos_persist256.bin").read_bytes())
+IMGPATH = sys.argv[1] if len(sys.argv) > 1 else "out/mainos_persist256.bin"
+IMG = bytes(pathlib.Path(IMGPATH).read_bytes())   # tools/build_all.py relocates the sidecar, so the
+                                                  # stub VAs are read from whichever image is passed
 # Both stub VAs are READ FROM THE IMAGE (the wave-23 refactor moves them), never hardcoded.
 LOAD_HOOK, BULK_HOOK = bd.LOAD_HOOK, bd.BULKLOAD_HOOK
 def _jmp_target(va):
