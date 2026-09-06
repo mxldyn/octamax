@@ -51,26 +51,32 @@ w32(v + 68, pos)
 e = S + 300 + (slice_idx + 1) * 12
 w32(e + 0, start); w32(e + 4, end); w32(e + 8, loop)
 
+# run the whole view header 0x4004581c (banner + panel border + content arm), so the
+# frame's position can be judged against the SLICES ribbon. A sentinel return address
+# on the stack marks completion.
+HEADER, SENTINEL = 0x4004581c, 0x40000aaa
 done = {"hit": False}
 def stop(uc_, addr, size, user):
-    if addr == ARM_EXIT:
+    if addr == SENTINEL:
         done["hit"] = True
         uc_.emu_stop()
 uc.hook_add(UC_HOOK_CODE, stop)
-uc.reg_write(UC_M68K_REG_A7, 0x41010000 - 12)
+sp = 0x41010000 - 4
+uc.mem_write(sp, struct.pack(">I", SENTINEL))
+uc.reg_write(UC_M68K_REG_A7, sp)
 try:
-    uc.emu_start(RENDER_SITE, 0, count=5_000_000)
+    uc.emu_start(HEADER, 0, count=8_000_000)
 except UcError as ex:
     print(f"UcError: {ex} at pc={uc.reg_read(UC_M68K_REG_PC):#x}")
 if not done["hit"]:
-    sys.exit("never reached ARM_EXIT")
+    sys.exit("never returned from the header")
 
 plane = uc.mem_read(PLANE0, 128 * 2 * 4)
 def px(x, y):
     lw = struct.unpack(">I", plane[(x * 2 + (y >> 5)) * 4:(x * 2 + (y >> 5)) * 4 + 4])[0]
     return (lw >> (y & 31)) & 1
 
-X0, X1, Y0, Y1 = 55, 122, 6, 28
+X0, X1, Y0, Y1 = 52, 122, 4, 34
 print(f"   {''.join(str(x % 10) for x in range(X0, X1 + 1))}")
 for y in range(Y0, Y1 + 1):
     row = "".join("#" if px(x, y) else "." for x in range(X0, X1 + 1))

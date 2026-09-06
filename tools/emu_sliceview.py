@@ -154,13 +154,13 @@ check("blit args dropped (sp back to caller frame)", uc.reg_read(UC_M68K_REG_A7)
 check("POSTED consumed", r8(uc, POSTED) == 0)
 fills = [a for f, a in calls if f == FILLRECT]
 check("area clear is first", calls and calls[0][0] == FILLRECT and
-      fills[0][1:6] == [61, 10, 117, 24, 0], str(calls[:1]))
+      fills[0][1:6] == [60, 8, 117, 24, 0], str(calls[:1]))
 check("bar box drawn", len(fills) >= 3 and fills[1][1:6] == [84, 13, 116, 21, 1]
       and fills[2][1:6] == [85, 14, 115, 20, 0], str(fills))
 # pos 1500 in [1000,2000] -> w = 500*31/1000 = 15 -> fill 85..99
 check("fill width matches position", len(fills) == 8 and fills[3][1:6] == [85, 14, 99, 20, 1],
       str(fills))
-FRAME = [[62, 10, 76, 10, 1], [62, 24, 76, 24, 1], [62, 10, 62, 24, 1], [76, 10, 76, 24, 1]]
+FRAME = [[61, 8, 75, 8, 1], [61, 22, 75, 22, 1], [61, 8, 61, 22, 1], [75, 8, 75, 22, 1]]
 check("trig-key frame edges drawn last", [f[1:6] for f in fills[4:8]] == FRAME, str(fills[4:]))
 vl = [a for f, a in calls if f == VLINE]
 # loop 1250 -> (250*30)/1000 = 7 -> x = 92, XOR, y 12..22
@@ -168,7 +168,7 @@ check("loop marker vline", len(vl) == 1 and vl[0][1:4] == [92, 12, 22] and
       vl[0][4] == 0xFFFFFFFF, str(vl))
 fmt = [a for f, a in calls if f == DRAWFMT]
 check("number drawn: font12 centred in the frame, mode 0, value 11",
-      len(fmt) == 1 and fmt[0][0] == 0x400ba89e and fmt[0][2:6] == [69, 14, 1, 0]
+      len(fmt) == 1 and fmt[0][0] == 0x400ba89e and fmt[0][2:6] == [68, 12, 1, 0]
       and fmt[0][8] == 11, str(fmt))
 check("no dashes on the playing path", fmt[0][7] == NM["sv_fmt"])
 
@@ -197,7 +197,7 @@ uc.reg_write(UC_M68K_REG_A7, sp0 - 12)
 pc = run_to(uc, RENDER_SITE, {RENDER_RESUME, ARM_EXIT})
 check("exits via the arm tail", pc == ARM_EXIT)
 txt = [a for f, a in calls if f == DRAWFMT]
-check("centred dashes", len(txt) == 1 and txt[0][0] == 0x400ba89e and txt[0][2:6] == [69, 14, 1, 0]
+check("centred dashes", len(txt) == 1 and txt[0][0] == 0x400ba89e and txt[0][2:6] == [68, 12, 1, 0]
       and txt[0][7] == NM["sv_dash"], str(txt))
 check("area clear + the 4 frame edges, no bar", len([1 for f, _ in calls if f == FILLRECT]) == 5)
 

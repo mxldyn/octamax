@@ -92,12 +92,12 @@ sv_on:
 | clear the whole grid area (sv_fill args: d0,d1,d2,d4,d5 = x0,y0,x1,y1,mode).
 | The number's 15x15 trig-key frame is drawn LAST (sv_frame): drawfmt paints a cleared
 | background box around the glyph, which would eat any border drawn before it.
-    moveq   #61,%d0
-    moveq   #10,%d1
+    moveq   #60,%d0
+    moveq   #8,%d1
     moveq   #117,%d2
     moveq   #24,%d4
     moveq   #0,%d5
-    bsr.w   sv_fill
+    bsr.w   sv_fill                 | clear (x60..117, y8..24: 2 rows lower than stock's zone)
 
 | resolve this track's voice: a2 = VOICES + track*0xA8
     moveq   #0,%d0
@@ -207,28 +207,28 @@ sv_dashes:
 
 | ---- the trig-key frame: four 1 px edges over the text's cleared background ----
 sv_frame:
-    moveq   #62,%d0
-    moveq   #10,%d1
-    moveq   #76,%d2
-    moveq   #10,%d4
+    moveq   #61,%d0
+    moveq   #8,%d1
+    moveq   #75,%d2
+    moveq   #8,%d4
     moveq   #1,%d5
-    bsr.b   sv_fill                 | top
-    moveq   #62,%d0
-    moveq   #24,%d1
-    moveq   #76,%d2
-    moveq   #24,%d4
+    bsr.b   sv_fill                 | bottom edge (y grows upward on this display)
+    moveq   #61,%d0
+    moveq   #22,%d1
+    moveq   #75,%d2
+    moveq   #22,%d4
     moveq   #1,%d5
-    bsr.b   sv_fill                 | bottom
-    moveq   #62,%d0
-    moveq   #10,%d1
-    moveq   #62,%d2
-    moveq   #24,%d4
+    bsr.b   sv_fill                 | top edge
+    moveq   #61,%d0
+    moveq   #8,%d1
+    moveq   #61,%d2
+    moveq   #22,%d4
     moveq   #1,%d5
     bsr.b   sv_fill                 | left
-    moveq   #76,%d0
-    moveq   #10,%d1
-    moveq   #76,%d2
-    moveq   #24,%d4
+    moveq   #75,%d0
+    moveq   #8,%d1
+    moveq   #75,%d2
+    moveq   #22,%d4
     moveq   #1,%d5
     bsr.b   sv_fill                 | right
     jmp     ARM_EXIT                | dirty flag + epilogue restore d2-d7/a2-fp
@@ -253,8 +253,8 @@ sv_text:
     move.l  %a1,%sp@-
     clr.l   %sp@-
     pea     1
-    pea     14
-    pea     69                      | centre of the 62..76 frame
+    pea     12
+    pea     68                      | centre of the 61..75 frame
     pea     SURF
     pea     FONT12
     jsr     DRAWFMT
