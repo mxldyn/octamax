@@ -27,7 +27,13 @@ script produces a `.syx` byte-identical to the reference build.
 ./fetch-os.sh                      # downloads the official OS into downloads/
 ./setup.sh                         # builds elektron-firmware-tool into vendor/
 
-# version 2.0 BETA — everything, including the 256 STATIC slots
+# version 2.1 BETA — everything: 256 STATIC slots + slice playhead + persistence
+python3 sysex/apply_patch.py \
+    -i downloads/extracted/OCTATRACK_OS1.40C.syx \
+    -p sysex/patches/octamax-2.1.json \
+    -o OCTAMAX_2.syx --bin OCTAMAX_2.bin
+
+# version 2.0 BETA — the previous release, kept for reference
 python3 sysex/apply_patch.py \
     -i downloads/extracted/OCTATRACK_OS1.40C.syx \
     -p sysex/patches/octamax-2.0-beta.json \
@@ -61,7 +67,8 @@ per-hunk byte verification always holds.
 
 | patch | size | contents |
 |---|---|---|
-| `patches/octamax-2.0-beta.json` | 4,587 B in 223 hunks (0.41%) | everything below **plus the 256 STATIC slots** |
+| `patches/octamax-2.1.json` | 5,459 B in 228 hunks (0.49%) | everything below **plus the slice playhead view and persistent PERSONALIZE toggles** |
+| `patches/octamax-2.0-beta.json` | 4,587 B in 223 hunks (0.41%) | the 2.0 release: behaviour patches **plus the 256 STATIC slots** |
 | `patches/maxolydian-r10.json` | 1,175 B in 22 hunks (0.11%) | the behaviour patches only |
 
 | id | source | effect |
