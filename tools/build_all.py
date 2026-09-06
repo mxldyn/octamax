@@ -5,6 +5,7 @@ build_all.py -- ONE image with every feature this repo has produced.
     maxolydian r10   lazy transitions, no BANK/PTN countdown, PERSONALIZE entries, boot branding
     arp scales       10 extra arpeggiator key-scale qualities
     dual-256         256 STATIC sample slots, with project.256 persistence
+    slice playhead   big blinking slice number + progress bar in the SRC>SLICES view
 
 Each of the three was developed against the SAME free code cave, so their stubs overlap. Nothing about
 the code conflicts -- the 16 maxolydian detour sites, the 3 arp sites and the 233 dual-256 byte-runs
@@ -17,6 +18,7 @@ fixed (its hunks are a released, checksummed patch) and relocates the other two 
     0x400d6c00 .. 0x400d6f9e   dual-256 sidecar                     (moved from 0x400d6600)
     0x400d7000 .. 0x400d702a   dual-256 allocator stub              (unchanged)
     0x400d7080 ..              serializer 256-extension             (moved from 0x400d6a00)
+    0x400d70c0 .. 0x400d734a   slice playhead                       (build_sliceview.py)
     0x400d7400 .. 0x400d7788   dual-256 helper family               (unchanged)
     0x400d77c0 / 0x400d7800    load-loop stub / token+AED stubs      (unchanged)
     0x400d7920 ..              arp scales                           (moved from 0x400d7000)
@@ -49,6 +51,7 @@ OUT = pathlib.Path("out/mainos_all.bin")
 STEP_MAXO = pathlib.Path("out/_all_maxo.bin")      # stock + maxolydian
 STEP_ARP = pathlib.Path("out/_all_arp.bin")        # + arp scales
 STEP_DUAL = pathlib.Path("out/_all_dual.bin")      # + dual-256
+STEP_PERS = pathlib.Path("out/_all_pers.bin")      # + 256 persistence
 
 # --- relocations (see the map above) ---
 BOOT_STUB_AT = 0x400d6ba0
@@ -115,13 +118,26 @@ def main():
 
     # 4) the 256-slot persistence half, with the serializer extension moved as well
     print()
-    run_module("build_persist256", {"SRC": STEP_DUAL, "OUT": OUT, "SER_CAVE": SER_CAVE_AT})
+    run_module("build_persist256", {"SRC": STEP_DUAL, "OUT": STEP_PERS, "SER_CAVE": SER_CAVE_AT})
 
-    # 5) verify nothing grew into anybody else's block
+    # 5) the SLICE PLAYHEAD view (needs the maxolydian PERSONALIZE arrays already in place)
+    print()
+    sv = run_module("build_sliceview", {"SRC": STEP_PERS, "OUT": OUT})
+    sv_blob = pathlib.Path("out/patch_sliceview.bin").read_bytes()
+
+    # 6) verify nothing grew into anybody else's block
     print()
     final = OUT.read_bytes()
     for va, end, new in maxo_blocks:
         got = bytes(final[off(va):off(end)])
+        # sliceview legitimately writes inside two r10 hunks (the appended PERSONALIZE
+        # entry and the item-count immediate); fold its recorded writes into the expectation
+        new = bytearray(new)
+        for wa, wb in sv.APPLIED:
+            for i, b in enumerate(wb):
+                if va <= wa + i < end:
+                    new[wa + i - va] = b
+        new = bytes(new)
         assert got == new, (f"maxolydian block 0x{va:08x} was overwritten: "
                             f"{got.hex()[:32]}... != {new.hex()[:32]}...")
     print(f"  verified: all {len(maxo_blocks)} maxolydian hunks intact in the final image")
@@ -131,8 +147,15 @@ def main():
         assert bytes(final[off(site):off(site) + 2]) == b"\x4e\xf9", f"arp detour 0x{site:08x} lost"
     assert int.from_bytes(final[off(0x400d4096):off(0x400d4096) + 4], "big") == 145, "arp enum count lost"
     print(f"  verified: arp blob ({len(arp_blob)} B) and its 3 detours + enum count intact")
+    import build_sliceview as sv
+    got = bytes(final[off(sv.CAVE):off(sv.CAVE) + len(sv_blob)])
+    assert got == sv_blob, "the sliceview blob was overwritten"
+    for site, _, _ in sv.DETOURS:
+        assert bytes(final[off(site):off(site) + 2]) == b"\x4e\xf9", f"sliceview detour 0x{site:08x} lost"
+    assert bytes(final[off(sv.COUNT_SITE):off(sv.COUNT_SITE) + 2]) == b"\x72\x12", "menu count lost"
+    print(f"  verified: sliceview blob ({len(sv_blob)} B), 2 detours and the menu count intact")
 
-    for f in (STEP_MAXO, STEP_ARP, STEP_DUAL):
+    for f in (STEP_MAXO, STEP_ARP, STEP_DUAL, STEP_PERS):
         f.unlink(missing_ok=True)
     stock = STOCK.read_bytes()
     changed = sum(1 for a, b in zip(stock, final) if a != b)
