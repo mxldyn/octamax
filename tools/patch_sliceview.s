@@ -89,15 +89,15 @@ sv_on:
     lea     %sp@(12),%sp            | drop the three blit args
     clr.b   POSTED                  | consumed: the tick may post again
 
-| clear the whole grid area
-    clr.l   %sp@-                   | mode 0 = clear
-    pea     24
-    pea     117
-    pea     10
-    pea     61
-    pea     SURF
-    jsr     FILLRECT
-    lea     %sp@(24),%sp
+| clear the whole grid area (sv_fill args: d0,d1,d2,d4,d5 = x0,y0,x1,y1,mode).
+| The number's 15x15 trig-key frame is drawn LAST (sv_frame): drawfmt paints a cleared
+| background box around the glyph, which would eat any border drawn before it.
+    moveq   #61,%d0
+    moveq   #10,%d1
+    moveq   #117,%d2
+    moveq   #24,%d4
+    moveq   #0,%d5
+    bsr.w   sv_fill
 
 | resolve this track's voice: a2 = VOICES + track*0xA8
     moveq   #0,%d0
@@ -135,22 +135,18 @@ sv_on:
     ble.w   sv_number               | degenerate bounds: number only
 
 | ---- bar box: 1 px border, empty interior ----
-    pea     1
-    pea     BAR_Y1
-    pea     BAR_X1
-    pea     BAR_Y0
-    pea     BAR_X0
-    pea     SURF
-    jsr     FILLRECT
-    lea     %sp@(24),%sp
-    clr.l   %sp@-
-    pea     BAR_Y1-1
-    pea     BAR_X1-1
-    pea     BAR_Y0+1
-    pea     BAR_X0+1
-    pea     SURF
-    jsr     FILLRECT
-    lea     %sp@(24),%sp
+    moveq   #BAR_X0,%d0
+    moveq   #BAR_Y0,%d1
+    moveq   #BAR_X1,%d2
+    moveq   #BAR_Y1,%d4
+    moveq   #1,%d5
+    bsr.w   sv_fill
+    moveq   #BAR_X0+1,%d0
+    moveq   #BAR_Y0+1,%d1
+    moveq   #BAR_X1-1,%d2
+    moveq   #BAR_Y1-1,%d4
+    moveq   #0,%d5
+    bsr.w   sv_fill
 
 | ---- fill: w = clamp(pos - start, 0..span) * BAR_IW / span ----
     move.l  %a2@(68),%d0            | live play position
@@ -164,15 +160,13 @@ sv_on:
     mulu.l  %d1,%d0
     divul   %d7,%d0                 | d0 = 0..BAR_IW
     beq.b   sv_marker               | zero width: nothing to fill
-    add.l   #BAR_X0,%d0             | x1 = 84 + w  (w>=1 -> fill 85..84+w)
-    pea     1
-    pea     BAR_Y1-1
-    move.l  %d0,%sp@-
-    pea     BAR_Y0+1
-    pea     BAR_X0+1
-    pea     SURF
-    jsr     FILLRECT
-    lea     %sp@(24),%sp
+    move.l  %d0,%d2
+    add.l   #BAR_X0,%d2             | x1 = 84 + w  (w>=1 -> fill 85..84+w)
+    moveq   #BAR_X0+1,%d0
+    moveq   #BAR_Y0+1,%d1
+    moveq   #BAR_Y1-1,%d4
+    moveq   #1,%d5
+    bsr.w   sv_fill
 
 | ---- loop marker: XOR vline at the loop point, if configured ----
 sv_marker:
@@ -194,39 +188,78 @@ sv_marker:
     jsr     VLINE
     lea     %sp@(20),%sp
 
-| ---- the number, centred on the middle of its zone (x 61..83 -> 72) ----
+| ---- the number, centred in the frame ----
 sv_number:
     tst.l   %d3
     bmi.b   sv_dashes               | no slice selected: "--" instead
     move.l  %d3,%d0
     addq.l  #1,%d0                  | display 1-based
+    lea     sv_fmt,%a0
+    lea     sv_meas,%a1
+    bsr.w   sv_text
+    bra.b   sv_frame
+
+sv_idle:
+sv_dashes:
+    lea     sv_dash,%a0             | "--", its own measure template, no varargs read
+    move.l  %a0,%a1
+    bsr.w   sv_text
+
+| ---- the trig-key frame: four 1 px edges over the text's cleared background ----
+sv_frame:
+    moveq   #62,%d0
+    moveq   #10,%d1
+    moveq   #76,%d2
+    moveq   #10,%d4
+    moveq   #1,%d5
+    bsr.b   sv_fill                 | top
+    moveq   #62,%d0
+    moveq   #24,%d1
+    moveq   #76,%d2
+    moveq   #24,%d4
+    moveq   #1,%d5
+    bsr.b   sv_fill                 | bottom
+    moveq   #62,%d0
+    moveq   #10,%d1
+    moveq   #62,%d2
+    moveq   #24,%d4
+    moveq   #1,%d5
+    bsr.b   sv_fill                 | left
+    moveq   #76,%d0
+    moveq   #10,%d1
+    moveq   #76,%d2
+    moveq   #24,%d4
+    moveq   #1,%d5
+    bsr.b   sv_fill                 | right
+    jmp     ARM_EXIT                | dirty flag + epilogue restore d2-d7/a2-fp
+
+| sv_fill: FILLRECT(SURF, d0, d1, d2, d4, d5) = (x0, y0, x1, y1, mode)
+sv_fill:
+    move.l  %d5,%sp@-
+    move.l  %d4,%sp@-
+    move.l  %d2,%sp@-
+    move.l  %d1,%sp@-
     move.l  %d0,%sp@-
-    pea     sv_fmt
-    pea     sv_meas
-    pea     1                       | mode: set
-    pea     1                       | align: centred on x
-    pea     12                      | y
-    pea     72                      | x
+    pea     SURF
+    jsr     FILLRECT
+    lea     %sp@(24),%sp
+    rts
+
+| sv_text: DRAWFMT(FONT12, SURF, 69, 13, centred, mode 0 = lit glyph no background,
+|                  measure %a1, fmt %a0, value %d0)
+sv_text:
+    move.l  %d0,%sp@-
+    move.l  %a0,%sp@-
+    move.l  %a1,%sp@-
+    clr.l   %sp@-
+    pea     1
+    pea     14
+    pea     69                      | centre of the 62..76 frame
     pea     SURF
     pea     FONT12
     jsr     DRAWFMT
     lea     %sp@(36),%sp
-    jmp     ARM_EXIT                | dirty flag + epilogue restore d2-d7/a2-fp
-
-sv_idle:
-    moveq   #0,%d3                  | fall into the dashes with no bar drawn
-sv_dashes:
-    pea     sv_dash
-    pea     sv_dash                 | its own measure template
-    pea     1
-    pea     1                       | centred, same anchor as the number
-    pea     12
-    pea     72
-    pea     SURF
-    pea     FONT12
-    jsr     DRAWFMT
-    lea     %sp@(32),%sp
-    jmp     ARM_EXIT
+    rts
 
 | =============================== tick ===============================
 | Entered from 0x40056c92, in the timer task, once per type-1 timer message.

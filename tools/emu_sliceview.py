@@ -158,15 +158,17 @@ check("area clear is first", calls and calls[0][0] == FILLRECT and
 check("bar box drawn", len(fills) >= 3 and fills[1][1:6] == [84, 13, 116, 21, 1]
       and fills[2][1:6] == [85, 14, 115, 20, 0], str(fills))
 # pos 1500 in [1000,2000] -> w = 500*31/1000 = 15 -> fill 85..99
-check("fill width matches position", len(fills) == 4 and fills[3][1:6] == [85, 14, 99, 20, 1],
+check("fill width matches position", len(fills) == 8 and fills[3][1:6] == [85, 14, 99, 20, 1],
       str(fills))
+FRAME = [[62, 10, 76, 10, 1], [62, 24, 76, 24, 1], [62, 10, 62, 24, 1], [76, 10, 76, 24, 1]]
+check("trig-key frame edges drawn last", [f[1:6] for f in fills[4:8]] == FRAME, str(fills[4:]))
 vl = [a for f, a in calls if f == VLINE]
 # loop 1250 -> (250*30)/1000 = 7 -> x = 92, XOR, y 12..22
 check("loop marker vline", len(vl) == 1 and vl[0][1:4] == [92, 12, 22] and
       vl[0][4] == 0xFFFFFFFF, str(vl))
 fmt = [a for f, a in calls if f == DRAWFMT]
-check("number drawn: font12 centred at (72,12), value 11",
-      len(fmt) == 1 and fmt[0][0] == 0x400ba89e and fmt[0][2:6] == [72, 12, 1, 1]
+check("number drawn: font12 centred in the frame, mode 0, value 11",
+      len(fmt) == 1 and fmt[0][0] == 0x400ba89e and fmt[0][2:6] == [69, 14, 1, 0]
       and fmt[0][8] == 11, str(fmt))
 check("no dashes on the playing path", fmt[0][7] == NM["sv_fmt"])
 
@@ -184,7 +186,7 @@ check("number drawn steady (value 4)", len(fmt) == 1 and fmt[0][8] == 4, str(fmt
 check("no loop marker when loop = -1", not any(f == VLINE for f, _ in calls))
 # pos 100/400 -> 100*31/400 = 7 -> fill 85..91
 fills = [a for f, a in calls if f == FILLRECT]
-check("bar still fills", len(fills) == 4 and fills[3][1:6] == [85, 14, 91, 20, 1], str(fills))
+check("bar still fills", len(fills) == 8 and fills[3][1:6] == [85, 14, 91, 20, 1], str(fills))
 
 # ---------------- render: idle voice ----------------
 print("render, flag ON: idle voice")
@@ -195,9 +197,9 @@ uc.reg_write(UC_M68K_REG_A7, sp0 - 12)
 pc = run_to(uc, RENDER_SITE, {RENDER_RESUME, ARM_EXIT})
 check("exits via the arm tail", pc == ARM_EXIT)
 txt = [a for f, a in calls if f == DRAWFMT]
-check("centred dashes", len(txt) == 1 and txt[0][0] == 0x400ba89e and txt[0][2:6] == [72, 12, 1, 1]
+check("centred dashes", len(txt) == 1 and txt[0][0] == 0x400ba89e and txt[0][2:6] == [69, 14, 1, 0]
       and txt[0][7] == NM["sv_dash"], str(txt))
-check("only the area clear otherwise", len([1 for f, _ in calls if f == FILLRECT]) == 1)
+check("area clear + the 4 frame edges, no bar", len([1 for f, _ in calls if f == FILLRECT]) == 5)
 
 # ---------------- render: whole-sample (slice -1) uses the trim triple ----------------
 print("render, flag ON: no slice selected (trim window)")
@@ -210,7 +212,7 @@ pc = run_to(uc, RENDER_SITE, {RENDER_RESUME, ARM_EXIT})
 check("exits via the arm tail", pc == ARM_EXIT)
 fills = [a for f, a in calls if f == FILLRECT]
 check("bar from the trim triple: 250*31/1000 = 7 -> 85..91",
-      len(fills) == 4 and fills[3][1:6] == [85, 14, 91, 20, 1], str(fills))
+      len(fills) == 8 and fills[3][1:6] == [85, 14, 91, 20, 1], str(fills))
 txt = [a for f, a in calls if f == DRAWFMT]
 check("dashes instead of a number", len(txt) == 1 and txt[0][7] == NM["sv_dash"], str(txt))
 
