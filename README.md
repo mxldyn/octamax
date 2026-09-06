@@ -71,9 +71,24 @@ Known limitations, and the reverse-engineering story behind each fix, are in
 [`DUAL256.md`](DUAL256.md). The short version: the **LOCK TRIG popup still stops at 128**,
 so to author locks on a high slot, select it on the track first and then place trigs.
 
-Everything from 1.x is still here and still **off by default** (lazy transitions, the
-BANK/PTN countdown switch, the extra arp scales). The unit reports `OCTAMAX_2` in the boot
-splash and under SYSTEM STATUS → OS VERSION.
+### Carried over from version 1.x
+
+Everything from the previous release is still here, still **off by default**:
+
+- **Lazy transitions** — on a pattern change to a different Part, sounding tracks keep
+  the previous Part's sound instead of jumping volume; the track LED dims until a trig
+  commits the track to the destination Part, and the A/B scene slots stay put across
+  the change.
+- **No BANK/PTN countdown** — the SELECT BANK / SELECT PATTERN windows stop expiring
+  after four seconds; press the key again (or pick a trig) to close them.
+- **Arp key scales** — the MIDI arpeggiator's key-scale (ARP SETUP, F knob) gains 10
+  qualities beyond the stock major/minor: the five Greek modes, blues,
+  phrygian-dominant, melodic-minor, octatonic and hirajoshi — 12 qualities × 12 roots.
+  `OFF`/`maj`/`min` stay byte-identical to stock, so the extra scales only appear if
+  you scroll past them.
+
+The behaviour switches live in the **PERSONALIZE** menu, unchecked by default. The unit
+reports `OCTAMAX_2` in the boot splash and under SYSTEM STATUS → OS VERSION.
 
 **[How to build your flashable file →](#1-the-fast-path--apply-the-pre-built-patch)**
 
