@@ -155,16 +155,16 @@ check("POSTED consumed", r8(uc, POSTED) == 0)
 fills = [a for f, a in calls if f == FILLRECT]
 check("area clear is first", calls and calls[0][0] == FILLRECT and
       fills[0][1:6] == [60, 8, 117, 24, 0], str(calls[:1]))
-check("bar box drawn", len(fills) >= 3 and fills[1][1:6] == [84, 13, 116, 21, 1]
-      and fills[2][1:6] == [85, 14, 115, 20, 0], str(fills))
-# pos 1500 in [1000,2000] -> w = 500*31/1000 = 15 -> fill 85..99
-check("fill width matches position", len(fills) == 8 and fills[3][1:6] == [85, 14, 99, 20, 1],
+check("bar box drawn", len(fills) >= 3 and fills[1][1:6] == [77, 13, 116, 17, 1]
+      and fills[2][1:6] == [78, 14, 115, 16, 0], str(fills))
+# pos 1500 in [1000,2000] -> w = 500*38/1000 = 19 -> fill 78..96
+check("fill width matches position", len(fills) == 8 and fills[3][1:6] == [78, 14, 96, 16, 1],
       str(fills))
 FRAME = [[61, 8, 75, 8, 1], [61, 22, 75, 22, 1], [61, 8, 61, 22, 1], [75, 8, 75, 22, 1]]
 check("trig-key frame edges drawn last", [f[1:6] for f in fills[4:8]] == FRAME, str(fills[4:]))
 vl = [a for f, a in calls if f == VLINE]
-# loop 1250 -> (250*30)/1000 = 7 -> x = 92, XOR, y 12..22
-check("loop marker vline", len(vl) == 1 and vl[0][1:4] == [92, 12, 22] and
+# loop 1250 -> (250*37)/1000 = 9 -> x = 87, XOR, y 12..18
+check("loop marker vline", len(vl) == 1 and vl[0][1:4] == [87, 12, 18] and
       vl[0][4] == 0xFFFFFFFF, str(vl))
 fmt = [a for f, a in calls if f == DRAWFMT]
 check("number drawn: font12 centred in the frame, mode 0, value 11",
@@ -186,7 +186,7 @@ check("number drawn steady (value 4)", len(fmt) == 1 and fmt[0][8] == 4, str(fmt
 check("no loop marker when loop = -1", not any(f == VLINE for f, _ in calls))
 # pos 100/400 -> 100*31/400 = 7 -> fill 85..91
 fills = [a for f, a in calls if f == FILLRECT]
-check("bar still fills", len(fills) == 8 and fills[3][1:6] == [85, 14, 91, 20, 1], str(fills))
+check("bar still fills", len(fills) == 8 and fills[3][1:6] == [78, 14, 86, 16, 1], str(fills))
 
 # ---------------- render: idle voice ----------------
 print("render, flag ON: idle voice")
@@ -211,8 +211,8 @@ uc.reg_write(UC_M68K_REG_A7, sp0 - 12)
 pc = run_to(uc, RENDER_SITE, {RENDER_RESUME, ARM_EXIT})
 check("exits via the arm tail", pc == ARM_EXIT)
 fills = [a for f, a in calls if f == FILLRECT]
-check("bar from the trim triple: 250*31/1000 = 7 -> 85..91",
-      len(fills) == 8 and fills[3][1:6] == [85, 14, 91, 20, 1], str(fills))
+check("bar from the trim triple: 250*38/1000 = 9 -> 78..86",
+      len(fills) == 8 and fills[3][1:6] == [78, 14, 86, 16, 1], str(fills))
 txt = [a for f, a in calls if f == DRAWFMT]
 check("dashes instead of a number", len(txt) == 1 and txt[0][7] == NM["sv_dash"], str(txt))
 

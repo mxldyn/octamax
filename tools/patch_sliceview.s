@@ -65,12 +65,13 @@
     .equ LED_RESUME,  0x40044502    | after the displaced moveb at the refresher tail
     .equ BEAT_RESUME, 0x40056f2a    | after the displaced tempo-LED jsr
 
-| bar geometry: box x 84..116, y 13..21; interior x 85..115 (31 px), y 14..20
-    .equ BAR_X0,  84
+| bar geometry: box x 77..116 (1 px clear of the frame at 75), 5 px tall centred on the
+| frame's midline; interior x 78..115 (38 px), y 14..16
+    .equ BAR_X0,  77
     .equ BAR_X1,  116
     .equ BAR_Y0,  13
-    .equ BAR_Y1,  21
-    .equ BAR_IW,  31
+    .equ BAR_Y1,  17
+    .equ BAR_IW,  38
 
     .text
     .global _start
