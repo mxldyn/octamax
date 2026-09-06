@@ -32,14 +32,14 @@ that copy.
 
 ---
 
-## Version 2.1 BETA
+## Version 2.0 BETA
 
 > **BETA — expect bugs.** This build is new and has been tested on one MKII unit. Keep
 > your official `.syx` at hand: `[FUNC]` + power on → `[TRIG 3]` recovers the unit even
 > if the OS is corrupt, because the bootloader is never touched. Your CF card, projects
 > and samples are not affected by flashing.
 
-### What's new in 2.1
+### What's new
 
 **SLICE PLAYHEAD — a readable SLICES view.** A new PERSONALIZE toggle replaces the
 4×16 slice grid of the FUNC+[down] SLICES view with the number of the slice that is
@@ -57,8 +57,6 @@ the custom words and the setters write the battery shadow, so all toggles surviv
 power cycles and OS upgrades, exactly like the stock PERSONALIZE settings. No project
 file format is touched. (Root cause and fix in `NOTES.md`, "PERSONALIZE persistence
 root-caused".)
-
-### What's new in 2.0
 
 **STATIC sample slots go from 128 to 256.** Slots 129–256 behave like the stock ones:
 they load samples, keep their slice grids (including `.ot` sidecar files), are assignable
@@ -210,8 +208,8 @@ freshly flashed unit is indistinguishable from stock until you opt in:
 | **Lazy transitions** | On a pattern change to a different Part, sounding tracks keep the previous Part's sound (no volume jump). The track LED dims while the track hasn't been re-trigged since the change; a trig commits it to the destination Part. Also keeps the A/B scene pointers on the same slots across the change. |
 | **No BANK/PTN countdown** | The SELECT BANK / SELECT PATTERN windows stop expiring after four seconds. |
 | **Arp key scales** | The MIDI arpeggiator's key-scale (ARP SETUP, F knob) gains 10 extra qualities beyond the stock major/minor: the five Greek modes (Dorian, Phrygian, Lydian, Mixolydian, Locrian) plus blues, phrygian-dominant, melodic-minor, octatonic and hirajoshi — 12 qualities × 12 roots. `OFF`/`maj`/`min` stay byte-identical to stock, so the extra scales only appear if you scroll the F knob past them. |
-| **Slice playhead** | *(new in 2.1)* The SRC>SLICES view shows the playing slice number in a trig-key frame, a live progress bar and the slice's loop point; the playing slice's trig button lights amber and pulses with the tempo LED. |
-| **PERSONALIZE options** | The three behavior switches (lazy transitions, no countdown, slice playhead), added to the PERSONALIZE menu, unchecked by default — and persistent across power cycles and OS upgrades since 2.1. |
+| **Slice playhead** | *(new in 2.0)* The SRC>SLICES view shows the playing slice number in a trig-key frame, a live progress bar and the slice's loop point; the playing slice's trig button lights amber and pulses with the tempo LED. |
+| **PERSONALIZE options** | The three behavior switches (lazy transitions, no countdown, slice playhead), added to the PERSONALIZE menu, unchecked by default and persistent across power cycles and OS upgrades. |
 | **256 STATIC slots** | *(new in 2.0)* Sample slots 129–256, with slices, track assignment, parameter locks and persistence across a power cycle. Always on — it extends capacity rather than changing behaviour. Written up in [`DUAL256.md`](DUAL256.md). |
 | **Boot branding** | Boot splash and SYSTEM STATUS show `OCTAMAX_2` instead of `1.40C`. |
 
@@ -368,8 +366,8 @@ detail. In short:
   recoverable.
 - Never cut power during **`UPDATING FLASH`**.
 - Your CF card, projects and samples are not affected by an OS update.
-- Since 2.1 the PERSONALIZE settings **persist across OS upgrades and power
-  cycles** (they live in the same battery-backed block as the stock settings).
+- The PERSONALIZE settings **persist across OS upgrades and power cycles**
+  (they live in the same battery-backed block as the stock settings).
   A Startup-Menu EMPTY RESET still clears them.
 
 ---
