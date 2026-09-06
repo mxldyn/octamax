@@ -3742,3 +3742,20 @@ It decides between the only two possibilities left:
 
 Gates: hookcheck OK; emu_probes 11/11 (B/L/P/AED); emu_check GREEN; audit identical to base; zero
 changes outside the four holes and the cave.
+
+## PERSONALIZE persistence root-caused: 0x800000xx is VOLATILE, the store is 'ANDY' @0x100fff00 [2026-09-06]
+The earlier "battery-backed RAM at 0x8000008c" inference (line ~1392) is WRONG. Boot re-images the whole
+DSP shared window from ROM (FUN_4000f938, sole caller 0x40000512): 0x401086f4 -> 0x80000000 (0x3e88 B)
+then zero-fill to 0x80004000 — every PERSONALIZE word is zeroed on every boot. The real persistent store
+is a checksummed 0x100-byte block in battery SRAM at 0x100fff00 (magic 'ANDY' @+4, version 36 @+0xe,
+checksum over 252 B from +4, computed by FUN_4001f23c; validate path FUN_4001f340 falls back to the
+defaults path FUN_4001f298, which zero-fills the whole block first). Boot restores runtime<-shadow with
+memcpy(0x80000070, 0x100fff00, 0x64) — 0x64 ends at 0x800000d3, one byte short of the patch words
+d4/d8/dc, which is why the custom toggles never survived a power cycle. Stock setters write BOTH copies
+(e.g. 0x40068898: 0x80000090 + 0x100fff20; shadow = 0x100fff00 + runtime - 0x80000070) and the
+PERSONALIZE key handler re-checksums after every setter (jmp 0x4001f23c at 0x40069074).
+project.work is NOT involved: the [SETTINGS] serializer/deserializer touch only 0x80000000..0x62.
+FIX (build_sliceview.py): the three `pea 0x64` (0x4001f322 defaults / 0x4001f3be validate / 0x4001fb24
+boot) -> 0x70 (ends 0x800000df, just short of the DSP frame selector 0x800000e0), setters write shadows
+0x100fff64/68/6c (menu setter entries 16/17 repointed from the r10 stubs to shadow-writing replacements
+in the sliceview cave; entry 19's setter does it natively).

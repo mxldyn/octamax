@@ -104,6 +104,29 @@ def main():
     APPLIED.append((COUNT_SITE, b"\x72\x12"))
     print(f"  PERSONALIZE entry {MENU_ENTRY + 1} appended, item count 18 -> 19")
 
+    # Persistence: the PERSONALIZE runtime words are volatile DSP shared RAM; the real
+    # store is the checksummed battery-SRAM block at 0x100fff00, restored to 0x80000070
+    # with length 0x64 — one byte short of our words. Extend all three `pea 0x64` to
+    # 0x70 (0x800000d4..df ride along; source stays inside the checksummed block and
+    # the defaults path zero-fills it, so unconfigured units still read 0 = off).
+    for site in (0x4001f322, 0x4001f3be, 0x4001fb24):
+        o = off(site)
+        if bytes(img[o:o + 4]) != b"\x48\x78\x00\x64":
+            sys.exit(f"restore-length pea at 0x{site:08x} is {bytes(img[o:o+4]).hex()}, want 48780064")
+        img[o + 3] = 0x70
+    print("  settings-restore length 0x64 -> 0x70 at 3 sites (boot/validate/defaults)")
+
+    # Repoint the r10 NO TIMER / LAZY setters (menu entries 16/17) to the shadow-writing
+    # replacements, so those toggles persist too. The r10 stubs stay, just unreferenced.
+    for idx, old, sym in ((16, 0x400d693e, "sv_set_notimer"), (17, 0x400d697e, "sv_set_lazy")):
+        o = off(MENU_SET + idx * 4)
+        got = int.from_bytes(img[o:o + 4], "big")
+        if got != old:
+            sys.exit(f"menu setter[{idx}] is 0x{got:08x}, want the r10 stub 0x{old:08x}")
+        img[o:o + 4] = syms[sym].to_bytes(4, "big")
+        APPLIED.append((MENU_SET + idx * 4, syms[sym].to_bytes(4, "big")))
+    print("  r10 setters repointed to persistent replacements (entries 16/17)")
+
     OUT.write_bytes(bytes(img))
     src = SRC.read_bytes()
     d = sum(1 for a, b in zip(src, img) if a != b)

@@ -58,6 +58,18 @@
     .equ GLYPH_ON,  0x400b5e90
     .equ GLYPH_OFF, 0x400b5e8e
 
+| The DSP shared-RAM words are VOLATILE — boot re-images 0x80000000.. from ROM. The real
+| persistent store is the checksummed 'ANDY' block in battery SRAM at 0x100fff00; boot
+| restores runtime 0x80000070 <- shadow 0x100fff00 (length patched 0x64 -> 0x70 by the
+| builder so our three words ride along). Stock setters write both copies; ours must too.
+| The PERSONALIZE key handler recomputes the block checksum after every setter (jmp
+| 0x4001f23c at 0x40069074), so no checksum work is needed here.
+    .equ F_NOTIMER,  0x800000d4
+    .equ F_LAZY,     0x800000d8
+    .equ SH_NOTIMER, 0x100fff64     | shadow = 0x100fff00 + (runtime - 0x80000070)
+    .equ SH_LAZY,    0x100fff68
+    .equ SH_SLICEVIEW, 0x100fff6c
+
     .equ PAGE,      0x460d16f4      | SLICES page 0..3 (slice = page*16 + trig)
     .equ LEDSETPAIR,0x400131f4      | (id): set both dies of a bicolor pair
     .equ LEDBRIGHT2,0x4001360c      | (id, level): brightness of both dies
@@ -396,10 +408,31 @@ gs_ret:
     rts
 
 set_sliceview:
-    move.l  F_SLICEVIEW,%d0
+    lea     F_SLICEVIEW,%a0
+    lea     SH_SLICEVIEW,%a1
+    bra.b   sv_setcommon
+
+| Persistent replacements for the r10 setters (the menu setter table entries 16/17 are
+| repointed here by the builder; the r10 cave stubs stay in place, just unreferenced).
+    .global sv_set_notimer, sv_set_lazy
+sv_set_notimer:
+    lea     F_NOTIMER,%a0
+    lea     SH_NOTIMER,%a1
+    bra.b   sv_setcommon
+
+sv_set_lazy:
+    lea     F_LAZY,%a0
+    lea     SH_LAZY,%a1
+
+| toggle = (runtime + delta) & 1, stored to the runtime word AND its battery shadow.
+| Reached by bra (not bsr): the caller's delta stays at 4(%sp) and the rts returns
+| straight to the PERSONALIZE dispatcher, which then recomputes the block checksum.
+sv_setcommon:
+    move.l  %a0@,%d0
     add.l   4(%sp),%d0
     andi.l  #1,%d0
-    move.l  %d0,F_SLICEVIEW
+    move.l  %d0,%a0@
+    move.l  %d0,%a1@
     rts
 
 | =============================== data ===============================

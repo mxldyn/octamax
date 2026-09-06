@@ -320,13 +320,29 @@ for flag, want in ((0, 0x400b5e8e), (1, 0x400b5e90)):
     pc = run_to(uc, NM["get_sliceview"], {0x400453f8})
     check(f"getter flag={flag}", uc.reg_read(UC_M68K_REG_D0) == want,
           hex(uc.reg_read(UC_M68K_REG_D0)))
-uc, _ = mk()
-w32(uc, F_FLAG, 0)
-uc.reg_write(UC_M68K_REG_A7, sp0 - 8)
-w32(uc, sp0 - 8, 0x400453f8)
-w32(uc, sp0 - 4, 1)                              # delta +1
-pc = run_to(uc, NM["set_sliceview"], {0x400453f8})
-check("setter toggles 0 -> 1", r32(uc, F_FLAG) == 1)
+def run_setter(sym, runtime, shadow):
+    uc, _ = mk()
+    w32(uc, runtime, 0)
+    uc.reg_write(UC_M68K_REG_A7, sp0 - 8)
+    w32(uc, sp0 - 8, 0x400453f8)
+    w32(uc, sp0 - 4, 1)                          # delta +1
+    run_to(uc, NM[sym], {0x400453f8})
+    return r32(uc, runtime), r32(uc, shadow)
+for sym, runtime, shadow in (("set_sliceview", 0x800000dc, 0x100fff6c),
+                             ("sv_set_notimer", 0x800000d4, 0x100fff64),
+                             ("sv_set_lazy", 0x800000d8, 0x100fff68)):
+    rt, sh = run_setter(sym, runtime, shadow)
+    check(f"{sym}: runtime and battery shadow both 0 -> 1", rt == 1 and sh == 1, f"rt={rt} sh={sh}")
+
+# the builder must have extended the settings-restore length and repointed setters 16/17
+def r32i(va):
+    o = va - BASE
+    return int.from_bytes(IMG[o:o+4], "big")
+check("restore length 0x70 at all 3 sites",
+      all(IMG[s_ - BASE:s_ - BASE + 4] == b"\x48\x78\x00\x70" for s_ in (0x4001f322, 0x4001f3be, 0x4001fb24)))
+check("menu setters 16/17 point at the persistent stubs",
+      r32i(0x400d6ae0) == NM["sv_set_notimer"] and r32i(0x400d6ae4) == NM["sv_set_lazy"],
+      f"{r32i(0x400d6ae0):#x} {r32i(0x400d6ae4):#x}")
 
 print()
 if FAILS:
