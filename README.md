@@ -50,6 +50,9 @@ with the tempo LED. Off by default; with the toggle off the view is stock, byte 
 byte. Works on high (129+) slots too. Design and addresses in
 [`DESIGN_SLICEVIEW.md`](DESIGN_SLICEVIEW.md).
 
+<p align="center"><img src="docs/img/slice-playhead.jpg" width="72%"
+alt="SLICE PLAYHEAD: slice 1 playing in its trig-key frame, progress bar with the loop-point marker"></p>
+
 **PERSONALIZE toggles now persist.** The custom switches used to reset on every power
 cycle (and OS upgrade): the firmware re-images their RAM window at boot and restores
 only the stock-sized settings block from battery SRAM. The restore length now covers
@@ -66,6 +69,13 @@ and play on the first trig. FLEX slots and the recorder buffers are untouched.
 Persistence uses the native `project.work` (which gains `SLOT=129..256` records) plus a
 `project.256` sidecar file next to your project. A project saved with high slots still
 opens on stock firmware — those slots simply come back empty.
+
+<p align="center">
+<img src="docs/img/static-slots-129.jpg" width="49%"
+alt="STATIC slot list crossing the old limit: slots 129-130 empty, 131-132 loaded">
+<img src="docs/img/static-slots-256.jpg" width="49%"
+alt="STATIC slot list at the top of the new range, slots 251-256">
+</p>
 
 Known limitations, and the reverse-engineering story behind each fix, are in
 [`DUAL256.md`](DUAL256.md). The short version: the **LOCK TRIG popup still stops at 128**,
@@ -86,6 +96,13 @@ Everything from the previous release is still here, still **off by default**:
   phrygian-dominant, melodic-minor, octatonic and hirajoshi — 12 qualities × 12 roots.
   `OFF`/`maj`/`min` stay byte-identical to stock, so the extra scales only appear if
   you scroll past them.
+
+<p align="center">
+<img src="docs/img/arp-scale-mix.jpg" width="49%"
+alt="MIDI ARP SETUP with the key scale on C mixolydian (MIX)">
+<img src="docs/img/arp-scale-lyd.jpg" width="49%"
+alt="MIDI ARP SETUP with the key scale on C lydian (LYD)">
+</p>
 
 The behaviour switches live in the **PERSONALIZE** menu, unchecked by default. The unit
 reports `OCTAMAX_2` in the boot splash and under SYSTEM STATUS → OS VERSION.
