@@ -31,7 +31,7 @@ script produces a `.syx` byte-identical to the reference build.
 python3 sysex/apply_patch.py \
     -i downloads/extracted/OCTATRACK_OS1.40C.syx \
     -p sysex/patches/octamax-2.0-beta.json \
-    -o OCTAMAX_2.syx --bin OCTAMAX_2.bin
+    -o OCTAMAX_2c.syx --bin OCTAMAX_2c.bin
 
 # version 1.x — the behaviour patches only (this is the default patch)
 python3 sysex/apply_patch.py \
@@ -43,8 +43,8 @@ python3 sysex/apply_patch.py \
 [1/5] stock .syx checksum ok
 [2/5] extracted section_3_MAIN_OS.bin (1,112,560 bytes)
 [3/5] applied 223 hunks (4587 bytes)
-[4/5] repacked -> OCTAMAX_2.syx
-      CF image  -> OCTAMAX_2.bin
+[4/5] repacked -> OCTAMAX_2c.syx
+      CF image  -> OCTAMAX_2c.bin
 [5/5] output checksum ok — byte-identical to the reference build
 ```
 
@@ -61,13 +61,14 @@ per-hunk byte verification always holds.
 
 | patch | size | contents |
 |---|---|---|
-| `patches/octamax-2.0-beta.json` | 5,459 B in 228 hunks (0.49%) | everything below **plus the 256 STATIC slots, the slice playhead view and persistent PERSONALIZE toggles** |
+| `patches/octamax-2.0-beta.json` | 5,497 B in 227 hunks (0.49%) | everything below **plus the 256 STATIC slots, the slice playhead view and persistent PERSONALIZE toggles** |
 | `patches/maxolydian-r10.json` | 1,175 B in 22 hunks (0.11%) | the behaviour patches only |
 
 | id | source | effect |
 |---|---|---|
 | `static-slots-256` | `tools/build_dual256.py` + `tools/build_persist256.py` | *(2.0 only)* STATIC sample slots 128 → 256, with slices, track assignment, parameter locks and persistence across a power cycle. See [`../DUAL256.md`](../DUAL256.md). |
 | `arp-key-scales` | `tools/patch_arp.s` | *(2.0 only)* 10 extra arpeggiator key-scale qualities beyond major/minor. |
+| `midi-mode-guard` | `tools/patch_sliceview.s`, `patch_led.s` | *(2.0 only)* The slice playhead hooks and the lazy-transitions LED dimmer stand down in MIDI mode (the view index is shared with the MIDI pages). Fixes the widget over the MIDI arp page, dimmed T1-T8 LEDs on MIDI tracks and an exception on [PAGE] there. |
 | `lazy-transitions` | `tools/patch.s`, `patch_enc.s`, `patch_led.s`, `patch_scene2.s` | Sounding tracks keep the previous Part's definition on a pattern change (track LED dimmed) until a trig, a manual trig or an encoder move; A/B scene pointers stay on the same slots. |
 | `no-bank-ptn-countdown` | `tools/patch_notimer.s` | SELECT BANK / SELECT PATTERN windows stop expiring. |
 | `personalize-options` | `tools/patch_notimer.s` | Both of the above are PERSONALIZE entries, **unchecked by default**, so an unconfigured unit behaves exactly like stock. |

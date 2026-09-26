@@ -36,6 +36,11 @@
     .equ POSTTIME,  0x80006c70      | long: BLINKCTR at last post, for the retry
 
     .equ VIEW,      0x460d16f0      | FUNC+[down] view index, 3 = SLICES
+    .equ MIDIMODE,  0x80000012      | non-zero = MIDI mode ([MIDI] key toggles it at 0x4005555c,
+                                    | mirror 0x100b14de; the track-LED painter reads it via
+                                    | 0x40033970). NOT 0x460d1736, a different UI toggle. The view index is
+                                    | shared with the MIDI pages (ARP setup is also view 3),
+                                    | so every hook must stand down while it is set.
     .equ MODAL,     0x460d1aec      | non-zero = popup/overlay open
     .equ UIQ,       0x460d17ae      | the UI task's message queue
     .equ POST,      0x40000c3c      | post(queue, msg) — interrupt-masked ring insert
@@ -94,7 +99,10 @@ _start:
     .global sv_render
 sv_render:
     tst.l   F_SLICEVIEW
-    bne.b   sv_on
+    beq.b   sv_off
+    tst.l   MIDIMODE                | MIDI pages share view index 3: stock drawing there
+    beq.b   sv_on
+sv_off:
     pea     0x400beafa              | displaced instruction: the grid bitmap arg
     jmp     RENDER_RESUME
 
@@ -282,6 +290,8 @@ sv_tick:
     addq.l  #1,BLINKCTR
     tst.l   F_SLICEVIEW
     beq.b   sv_tick_out
+    tst.l   MIDIMODE                | never post redraws for a MIDI page
+    bne.b   sv_tick_out
     moveq   #3,%d0
     cmp.l   VIEW,%d0                | SLICES view on screen?
     bne.b   sv_tick_out
@@ -315,6 +325,8 @@ sv_tick_out:
 sv_ledid:
     tst.l   F_SLICEVIEW
     beq.b   sl_no
+    tst.l   MIDIMODE                | MIDI mode: the trig LEDs belong to the MIDI track
+    bne.b   sl_no
     moveq   #3,%d0
     cmp.l   VIEW,%d0
     bne.b   sl_no

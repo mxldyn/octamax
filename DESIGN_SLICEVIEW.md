@@ -99,7 +99,9 @@ Header ("SLICES 1-16") is separate (`0x40035f78`) and stays.
   (`movel 0x460d16f4,%d0`, hookcheck OK).
 - View/state guards the stub must respect: `0x460d16f0 == 3` (SLICES view),
   `0x460d1aec == 0` (no modal) — both already checked upstream of the arm, so
-  hooking inside the arm inherits them.
+  hooking inside the arm inherits them. **Plus `0x80000012 == 0` (not MIDI
+  mode)**: the view index is shared with the MIDI pages (the MIDI ARP setup page
+  is view 3 too), so every hook checks the MIDI flag itself (2026-09-26 fix).
 - **Reentrancy rule** (patch_gui VEC:0B lesson): the renderer keeps no
   per-call globals, or guards them.
 

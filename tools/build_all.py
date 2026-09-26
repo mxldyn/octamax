@@ -18,7 +18,7 @@ fixed (its hunks are a released, checksummed patch) and relocates the other two 
     0x400d6c00 .. 0x400d6f9e   dual-256 sidecar                     (moved from 0x400d6600)
     0x400d7000 .. 0x400d702a   dual-256 allocator stub              (unchanged)
     0x400d7080 ..              serializer 256-extension             (moved from 0x400d6a00)
-    0x400d70c0 .. 0x400d734a   slice playhead                       (build_sliceview.py)
+    0x400d70a8 .. 0x400d73f6   slice playhead                       (build_sliceview.py)
     0x400d7400 .. 0x400d7788   dual-256 helper family               (unchanged)
     0x400d77c0 / 0x400d7800    load-loop stub / token+AED stubs      (unchanged)
     0x400d7920 ..              arp scales                           (moved from 0x400d7000)
@@ -29,14 +29,14 @@ grows into someone else's block fails the build instead of the unit.
 
     python3 tools/build_all.py            # -> out/mainos_all.bin
 
-Packaging (the release is branded OCTAMAX_2; the ELEK version field holds 10 chars):
+Packaging (the release is branded OCTAMAX_2c; the ELEK version field holds 10 chars):
 
-    EFT_EMIT_CONTAINER=out/elek_octamax2.bin elektron-firmware-tool \
+    EFT_EMIT_CONTAINER=out/elek_octamax2b.bin elektron-firmware-tool \
         -i downloads/extracted/OCTATRACK_OS1.40C.syx -c 3 out/mainos_all.bin \
-        -V OCTAMAX_2 -o out/OCTAMAX_2.syx
-    python3 tools/make_bin.py out/elek_octamax2.bin -o out/OCTAMAX_2.bin --expect-version OCTAMAX_2
+        -V OCTAMAX_2c -o out/OCTAMAX_2c.syx
+    python3 tools/make_bin.py out/elek_octamax2b.bin -o out/OCTAMAX_2c.bin --expect-version OCTAMAX_2c
 
-Boot splash and SYSTEM STATUS -> OS VERSION then read OCTAMAX_2 instead of the r10 build's
+Boot splash and SYSTEM STATUS -> OS VERSION then read OCTAMAX_2c instead of the r10 build's
 MAXOLYDIAN, so the combined image is identifiable on the unit.
 """
 import json, pathlib, subprocess, sys
@@ -82,6 +82,31 @@ def apply_maxolydian(img):
     return blocks
 
 
+LED_AT, LED_LIMIT = 0x400d6800, 0x400d6900   # r10 block: patch_led, up to patch_notimer
+
+
+def rebuild_led_stub(img, maxo_blocks):
+    """led_stub ships inside the released r10 hunks, but its source gained a MIDI-mode gate
+    (MIDI tracks never take part in a Part transition, so their T1..T8 LEDs must stay at the
+    stock level). Reassemble it from tools/patch_led.s over the r10 bytes and swap the block's
+    expectation so the byte-for-byte verification checks the new stub instead."""
+    subprocess.run(["m68k-elf-as", "-mcpu=5407", "-o", "out/patch_led.o", "tools/patch_led.s"], check=True)
+    subprocess.run(["m68k-elf-ld", f"-Ttext=0x{LED_AT:x}", "-o", "out/patch_led.elf", "out/patch_led.o"],
+                   capture_output=True)
+    subprocess.run(["m68k-elf-objcopy", "-O", "binary", "out/patch_led.elf", "out/patch_led.bin"], check=True)
+    blob = pathlib.Path("out/patch_led.bin").read_bytes()
+    assert LED_AT + len(blob) <= LED_LIMIT, f"led_stub {len(blob)} B overruns 0x{LED_LIMIT:08x}"
+    idx = [i for i, (va, _, _) in enumerate(maxo_blocks) if va == LED_AT]
+    assert len(idx) == 1, "r10 JSON has no hunk at the led_stub address"
+    va, end, old = maxo_blocks[idx[0]]
+    assert bytes(img[off(va):off(end)]) == old, "led_stub block is not the r10 bytes"
+    assert not any(img[off(end):off(LED_LIMIT)]), "bytes after the r10 led_stub are not free"
+    img[off(LED_AT):off(LED_AT) + len(blob)] = blob
+    assert int.from_bytes(img[off(0x40083fb4) + 2:off(0x40083fb4) + 6], "big") == LED_AT, "led detour lost"
+    maxo_blocks[idx[0]] = (LED_AT, LED_AT + len(blob), blob)
+    print(f"led_stub rebuilt from source: {len(blob)} B @ 0x{LED_AT:08x} (r10 had {len(old)} B), MIDI-mode gate")
+
+
 def run_module(modname, overrides):
     """Import a builder, override its module-level constants, run its main()."""
     mod = __import__(modname)
@@ -99,6 +124,7 @@ def main():
 
     # 1) the published behaviour patch, at its released addresses
     maxo_blocks = apply_maxolydian(img)
+    rebuild_led_stub(img, maxo_blocks)
     STEP_MAXO.write_bytes(bytes(img))
 
     # 2) arp scales, relocated out of the dual-256 allocator stub's cave

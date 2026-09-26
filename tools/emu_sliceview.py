@@ -41,6 +41,7 @@ TICK_SITE, TICK_RESUME = 0x40056c92, 0x40056c98
 LED_SITE, LED_RESUME = 0x400444fc, 0x40044502
 BEAT_SITE, BEAT_RESUME = 0x40056f24, 0x40056f2a
 PAGE = 0x460d16f4
+MIDIMODE = 0x80000012
 
 SETTINGS_FAKE = 0x100d5b30          # any RAM address works; use the real STATIC base
 
@@ -216,10 +217,24 @@ check("bar from the trim triple: 250*38/1000 = 9 -> 78..86",
 txt = [a for f, a in calls if f == DRAWFMT]
 check("dashes instead of a number", len(txt) == 1 and txt[0][7] == NM["sv_dash"], str(txt))
 
+# ---------------- render: MIDI mode shares view 3 (ARP setup) -> stock drawing ----------------
+print("render, flag ON but MIDI mode: stock arm")
+uc, calls = mk()
+w32(uc, F_FLAG, 1); w32(uc, MIDIMODE, 1)
+setup_voice(uc, track=2, active=True, slice_idx=10, pos=1500, start=1000, end=2000, loop=1250)
+uc.reg_write(UC_M68K_REG_A7, sp0 - 12)
+uc.reg_write(UC_M68K_REG_D4, 0x1234); uc.reg_write(UC_M68K_REG_A2, 0x5678)
+pc = run_to(uc, RENDER_SITE, {RENDER_RESUME, ARM_EXIT})
+check("resumes into the stock arm", pc == RENDER_RESUME)
+sp = uc.reg_read(UC_M68K_REG_A7)
+check("pea replayed", sp == sp0 - 16 and r32(uc, sp) == 0x400beafa)
+check("registers untouched", uc.reg_read(UC_M68K_REG_D4) == 0x1234 and uc.reg_read(UC_M68K_REG_A2) == 0x5678)
+check("no draw calls", not calls)
+
 # ---------------- tick paths ----------------
-def run_tick(flag, view, modal, posted, blink, posttime):
+def run_tick(flag, view, modal, posted, blink, posttime, midi=0):
     uc, calls = mk()
-    w32(uc, F_FLAG, flag); w32(uc, VIEW, view); w32(uc, MODAL, modal)
+    w32(uc, F_FLAG, flag); w32(uc, VIEW, view); w32(uc, MODAL, modal); w32(uc, MIDIMODE, midi)
     w8(uc, POSTED, posted); w32(uc, BLINKCTR, blink); w32(uc, POSTTIME, posttime)
     uc.reg_write(UC_M68K_REG_A7, sp0)
     pc = run_to(uc, TICK_SITE, {TICK_RESUME})
@@ -243,6 +258,8 @@ uc, pc, posts = run_tick(flag=1, view=2, modal=0, posted=0, blink=0, posttime=0)
 check("other view: no post", not posts)
 uc, pc, posts = run_tick(flag=1, view=3, modal=1, posted=0, blink=0, posttime=0)
 check("modal open: no post", not posts)
+uc, pc, posts = run_tick(flag=1, view=3, modal=0, posted=0, blink=0, posttime=0, midi=1)
+check("MIDI mode: no post, still counts", pc == TICK_RESUME and not posts and r32(uc, BLINKCTR) == 1)
 
 # msg blob: event 78, 8 bytes
 uc, _ = mk()
@@ -255,6 +272,7 @@ def run_led(site, resume, **voice_kw):
     w32(uc, F_FLAG, voice_kw.pop("flag", 1))
     w32(uc, VIEW, voice_kw.pop("view", 3))
     w32(uc, PAGE, voice_kw.pop("page", 0))
+    w32(uc, MIDIMODE, voice_kw.pop("midi", 0))
     if voice_kw:
         setup_voice(uc, **voice_kw)
     uc.reg_write(UC_M68K_REG_A7, sp0)
@@ -285,6 +303,10 @@ check("flag off: no LED calls", pc == LED_RESUME and not calls)
 uc, pc, calls = run_led(LED_SITE, LED_RESUME,
                         track=2, active=False, slice_idx=5, pos=0, start=0, end=100, loop=-1 & 0xFFFFFFFF)
 check("idle voice: no LED calls", pc == LED_RESUME and not calls)
+uc, pc, calls = run_led(LED_SITE, LED_RESUME, page=1, midi=1,
+                        track=2, active=True, slice_idx=21, pos=0, start=0, end=100, loop=-1 & 0xFFFFFFFF)
+check("MIDI mode: no LED calls, d3/d4 preserved", pc == LED_RESUME and not calls and
+      uc.reg_read(UC_M68K_REG_D3) == 0x1111 and uc.reg_read(UC_M68K_REG_D4) == 0x2222)
 
 # ---------------- trig LED: beat pulse rides the tempo-LED arm ----------------
 print("beat pulse")
@@ -309,6 +331,14 @@ w32(uc, sp0 - 8, 0x26); w32(uc, sp0 - 4, 3)
 pc = run_to(uc, BEAT_SITE, {BEAT_RESUME})
 fl = [a[:2] for f, a in calls if f == LEDFLASH]
 check("other view: only the stock tempo flash", pc == BEAT_RESUME and fl == [[0x26, 3]], str(fl))
+uc, calls = mk()
+w32(uc, F_FLAG, 1); w32(uc, VIEW, 3); w32(uc, PAGE, 0); w32(uc, MIDIMODE, 1)
+setup_voice(uc, track=0, active=True, slice_idx=7, pos=0, start=0, end=100, loop=-1 & 0xFFFFFFFF)
+uc.reg_write(UC_M68K_REG_A7, sp0 - 8)
+w32(uc, sp0 - 8, 0x26); w32(uc, sp0 - 4, 3)
+pc = run_to(uc, BEAT_SITE, {BEAT_RESUME})
+fl = [a[:2] for f, a in calls if f == LEDFLASH]
+check("MIDI mode: only the stock tempo flash", pc == BEAT_RESUME and fl == [[0x26, 3]], str(fl))
 
 # ---------------- menu getter/setter ----------------
 print("menu")

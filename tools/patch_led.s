@@ -36,6 +36,8 @@
 
     .equ TRK_PART,  0x8000182a      | per_track_part[8], byte per track
     .equ ACT_PART,  0x80000002      | active Part
+    .equ MIDI_MODE, 0x80000012      | non-zero while the [MIDI] key mode is on (toggled 0x4005555c;
+                                    | the painter itself reads it through 0x40033970). NOT 0x460d1736.
     .equ BRIGHT_TMP,0x80006c65      | survives the call: FUN_400135b0 may clobber d0
     .equ RESUME,    0x40083fc4      | back into the loop, at addq.l #1,D5
 
@@ -48,6 +50,8 @@ _start:
 led_stub:
     tst.l   0x800000d8                 | gate: LAZY TRANSITIONS apagado -> brillo de fabrica
     beq.b   lb_norm
+    tst.l   MIDI_MODE                  | modo MIDI: los T1..T8 son pistas MIDI, que no
+    bne.b   lb_norm                    | participan en la transicion -> brillo de fabrica
     | --- decide the level for this track ---
     lea     TRK_PART,%a0
     moveq   #0,%d1

@@ -15,11 +15,16 @@ SETLEVEL = 0x400135b0          # A3 apunta aca
 LVL_NORM, LVL_DIRTY = 0xF, 0x5
 
 
-def run(track, part_of_track, active_part, lazy=1):
+MIDI_MODE = 0x80000012
+
+
+def run(track, part_of_track, active_part, lazy=1, midi=0):
     uc = Uc(UC_ARCH_M68K, UC_MODE_BIG_ENDIAN)
     uc.mem_map(0x40000000, 0x400000)
     uc.mem_map(0x80000000, 0x20000)
     uc.mem_map(0x41000000, 0x20000)
+    uc.mem_map(0x46000000, 0x200000)
+    uc.mem_write(MIDI_MODE, struct.pack('>I', midi))
     uc.mem_write(STUB_ADDR, STUB)
     # FUN_400135b0 simulado: un rts, para capturar los argumentos ya empujados
     uc.mem_write(SETLEVEL, b"\x4e\x75")
@@ -110,5 +115,10 @@ check("4 track 7 (ultimo), no en transicion",
 
 check("5 GATE apagado: brillo de fabrica aunque este en transicion",
       run(track=3, part_of_track=1, active_part=2, lazy=0), LVL_NORM)
+
+check("6 MODO MIDI: brillo de fabrica aunque la pista de audio este en transicion",
+      run(track=3, part_of_track=1, active_part=2, midi=1), LVL_NORM)
+check("7 MODO MIDI apagado explicitamente: sigue atenuando",
+      run(track=3, part_of_track=1, active_part=2, midi=0), LVL_DIRTY)
 
 print("\n" + ("TODOS OK" if not FAILS else "FALLAN: " + ", ".join(FAILS)))

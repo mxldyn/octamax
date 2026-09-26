@@ -3759,3 +3759,45 @@ FIX (build_sliceview.py): the three `pea 0x64` (0x4001f322 defaults / 0x4001f3be
 boot) -> 0x70 (ends 0x800000df, just short of the DSP frame selector 0x800000e0), setters write shadows
 0x100fff64/68/6c (menu setter entries 16/17 repointed from the r10 stubs to shadow-writing replacements
 in the sliceview cave; entry 19's setter does it natively).
+
+## MIDI mode was unguarded: exception on [PAGE] in a MIDI arp page, widget + dim LEDs on MIDI tracks [2026-09-26]
+**Symptoms (hardware, OCTAMAX_2 with slice playhead):** (1) `EXCEPTION SSP:4 VEC:03 FS:4 SR:2000
+ADDR:4007E900` while pressing [PAGE] on a MIDI track's ARPEGGIATOR page during a live set; (2) the
+SLICE PLAYHEAD widget ("SLICES 1-16", big number, bar) drawn over the MIDI arp page; (3) T1..T8 LEDs
+dimmed in MIDI mode while LAZY TRANSITIONS is on (normal again when it is switched off).
+
+**Frame reading:** VEC 3 = ColdFire address error, FS 4 = fault on instruction fetch, ADDR = the `rts`
+at 0x4007e900 of the 8-slot callback dispatcher FUN_4007e8d8 (walks 0x460e762c stride 14, `jsr (a0)`
+per slot, idx in d2). Its slot-0 callback is the trig-LED refresher FUN_40043fdc, slot 6 the track-LED
+painter FUN_40083eb0 -- both host our detours (sv_led @0x400444fc, led_stub @0x40083fb4). The
+refresher's MIDI branch (`tstl 0x460d1736` at 0x40043fe8 -> FUN_40034bd4 -> 0x40044382 -> `bra
+0x400444fc`) lands on the sv_led detour too.
+
+**Root cause:** `0x460d1736` is the MIDI-mode flag (set 0x400487c0 / cleared 0x40048798, 0x4006180a by
+the [MIDI] key; tested first thing by the [PAGE] handler 0x4004ffd4 and by 26 other sites). The
+FUNC+[down] view index `0x460d16f0` is SHARED between audio and MIDI pages: the MIDI ARP setup page is
+view 3, the same value as SRC>SLICES. Every sliceview hook keyed on `VIEW == 3` (the render arm at
+0x40044cda is reached in MIDI mode as well; sv_tick then posts event-78 redraws on every timer tick
+because sv_render keeps clearing POSTED; sv_ledid paints the audio CURTRACK's slice LED on a MIDI
+page), and led_stub compared `per_track_part[t]` (audio tracks) while painting MIDI-track LEDs.
+
+**Fix:** `MIDIMODE 0x460d1736` gate in sv_render (stock path), sv_tick (no post), sv_ledid (-1, covers
+sv_led + sv_beat) and led_stub (stock level). The blob grew 24 B past 0x400d7400, so the sliceview cave
+now starts at 0x400d70a8 (the 30 B gap after the serializer-ext; helper family untouched). led_stub is
+inside the released r10 hunk, so build_all now reassembles tools/patch_led.s over it (78 B, limit
+0x400d6900) and swaps that block's byte-for-byte expectation. Gates: emu_check GREEN, emu_led 7/7
+(new: MIDI on/off), emu_sliceview ALL GREEN (new: render/tick/led/beat under MIDI), verify_dual256
+200/200, audit clean. Packaged out/OCTAMAX_2b.{syx,bin}; sysex/patches/octamax-2.0-beta.json
+regenerated with tools/make_patch_json.py (227 hunks) and round-tripped byte-identical through
+apply_patch.py. The exact write that flipped the dispatcher's return address was NOT reproduced in
+the emulator; the fix removes every path our code takes in MIDI mode, which is where all three
+symptoms live. Re-test on hardware: MIDI arp page + [PAGE] with the sequencer running, LAZY on.
+
+**Correction [2026-09-26, same day]:** hardware still showed dimmed T1..T8 LEDs in MIDI mode after the
+build above. `0x460d1736` is NOT the MIDI-mode flag (it is a different UI toggle: set/cleared by the key
+handler 0x40048774 along with 0x460d1a9e.. resets). The real MIDI-mode flag is **`0x80000012`**
+(toggled by the [MIDI] key at 0x4005555c/0x4005557a with mirror 0x100b14de, loaded at 0x40087e62; 202
+refs; the track-LED painter reads it through its getter 0x40033970 at 0x40083ee2, and sv_led's host
+uses it to offset the track index by 8). All four sliceview gates and led_stub now test 0x80000012.
+Rebuilt as OCTAMAX_2c.
+

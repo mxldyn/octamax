@@ -21,7 +21,7 @@ sys.path.insert(0, "tools")
 from hookcheck import check_holes
 
 BASE = 0x40000400
-CAVE = 0x400d70c0
+CAVE = 0x400d70a8                  # right after the serializer-ext (ends 0x400d70a2)
 CAVE_LIMIT = 0x400d7400            # dual-256 helper family starts here
 SRC = pathlib.Path("out/mainos_all.bin")
 OUT = pathlib.Path("out/mainos_sliceview.bin")
