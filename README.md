@@ -50,6 +50,7 @@ change while playing, immediate when stopped). With `[BANK]` *held* the window s
 `[BANK]` is released, as stock does after a pattern pick, and a further trig picks another
 pattern; pattern chaining (hold the bank's trig, press more trigs) and the `[PTN]` key keep
 their stock behaviour. Off by default; with the toggle off the handler is stock byte for byte.
+Confirmed on hardware.
 
 **SLICE PLAYHEAD — a readable SLICES view.** A new PERSONALIZE toggle replaces the
 4×16 slice grid of the FUNC+[down] SLICES view with the number of the slice that is
