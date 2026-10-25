@@ -6,6 +6,7 @@ build_all.py -- ONE image with every feature this repo has produced.
     arp scales       10 extra arpeggiator key-scale qualities
     dual-256         256 STATIC sample slots, with project.256 persistence
     slice playhead   big blinking slice number + progress bar in the SRC>SLICES view
+    bank auto ptn 1  a bank pick in SELECT BANK also picks its pattern 1 (PERSONALIZE toggle)
 
 Each of the three was developed against the SAME free code cave, so their stubs overlap. Nothing about
 the code conflicts -- the 16 maxolydian detour sites, the 3 arp sites and the 233 dual-256 byte-runs
@@ -29,15 +30,20 @@ grows into someone else's block fails the build instead of the unit.
 
     python3 tools/build_all.py            # -> out/mainos_all.bin
 
-Packaging (the release is branded OCTAMAX_2c; the ELEK version field holds 10 chars):
+Packaging (the release is branded OCTAMAX_2d; the ELEK version field holds 10 chars):
 
-    EFT_EMIT_CONTAINER=out/elek_octamax2b.bin elektron-firmware-tool \
+    EFT_EMIT_CONTAINER=out/elek_octamax2d.bin vendor/elektron-firmware-tool/elektron-firmware-tool \
         -i downloads/extracted/OCTATRACK_OS1.40C.syx -c 3 out/mainos_all.bin \
-        -V OCTAMAX_2c -o out/OCTAMAX_2c.syx
-    python3 tools/make_bin.py out/elek_octamax2b.bin -o out/OCTAMAX_2c.bin --expect-version OCTAMAX_2c
+        -V OCTAMAX_2d -o out/OCTAMAX_2d.syx
+    python3 tools/make_bin.py out/elek_octamax2d.bin -o out/OCTAMAX_2d.bin --expect-version OCTAMAX_2d
+    python3 tools/make_patch_json.py --img out/mainos_all.bin --syx out/OCTAMAX_2d.syx \
+        --patch sysex/patches/octamax-2.0-beta.json
 
-Boot splash and SYSTEM STATUS -> OS VERSION then read OCTAMAX_2c instead of the r10 build's
+Boot splash and SYSTEM STATUS -> OS VERSION then read OCTAMAX_2d instead of the r10 build's
 MAXOLYDIAN, so the combined image is identifiable on the unit.
+
+Gates after a build: emu_check, verify_dual256, audit_dual256 --img out/mainos_all.bin,
+emu_sliceview out/mainos_all.bin, emu_led, emu_autoptn out/mainos_all.bin.
 """
 import json, pathlib, subprocess, sys
 
@@ -52,6 +58,7 @@ STEP_MAXO = pathlib.Path("out/_all_maxo.bin")      # stock + maxolydian
 STEP_ARP = pathlib.Path("out/_all_arp.bin")        # + arp scales
 STEP_DUAL = pathlib.Path("out/_all_dual.bin")      # + dual-256
 STEP_PERS = pathlib.Path("out/_all_pers.bin")      # + 256 persistence
+STEP_SV = pathlib.Path("out/_all_sv.bin")          # + slice playhead
 
 # --- relocations (see the map above) ---
 BOOT_STUB_AT = 0x400d6ba0
@@ -148,18 +155,25 @@ def main():
 
     # 5) the SLICE PLAYHEAD view (needs the maxolydian PERSONALIZE arrays already in place)
     print()
-    sv = run_module("build_sliceview", {"SRC": STEP_PERS, "OUT": OUT})
+    sv = run_module("build_sliceview", {"SRC": STEP_PERS, "OUT": STEP_SV})
     sv_blob = pathlib.Path("out/patch_sliceview.bin").read_bytes()
 
-    # 6) verify nothing grew into anybody else's block
+    # 6) BANK AUTO PTN 1 (claims the 20th, last PERSONALIZE entry; cave after the arp blob)
+    print()
+    ap = run_module("build_autoptn", {"SRC": STEP_SV, "OUT": OUT})
+    ap_blob = pathlib.Path("out/patch_autoptn.bin").read_bytes()
+    assert ARP_AT + len(arp_blob) <= ap.CAVE, "the arp blob runs into the autoptn cave"
+
+    # 7) verify nothing grew into anybody else's block
     print()
     final = OUT.read_bytes()
     for va, end, new in maxo_blocks:
         got = bytes(final[off(va):off(end)])
-        # sliceview legitimately writes inside two r10 hunks (the appended PERSONALIZE
-        # entry and the item-count immediate); fold its recorded writes into the expectation
+        # sliceview and autoptn legitimately write inside two r10 hunks (the appended
+        # PERSONALIZE entries and the item-count immediate); fold their recorded writes, in
+        # build order, into the expectation
         new = bytearray(new)
-        for wa, wb in sv.APPLIED:
+        for wa, wb in sv.APPLIED + ap.APPLIED:
             for i, b in enumerate(wb):
                 if va <= wa + i < end:
                     new[wa + i - va] = b
@@ -178,16 +192,27 @@ def main():
     assert got == sv_blob, "the sliceview blob was overwritten"
     for site, _, _ in sv.DETOURS:
         assert bytes(final[off(site):off(site) + 2]) == b"\x4e\xf9", f"sliceview detour 0x{site:08x} lost"
-    assert bytes(final[off(sv.COUNT_SITE):off(sv.COUNT_SITE) + 2]) == b"\x72\x12", "menu count lost"
-    print(f"  verified: sliceview blob ({len(sv_blob)} B), 2 detours and the menu count intact")
+    print(f"  verified: sliceview blob ({len(sv_blob)} B) and its {len(sv.DETOURS)} detours intact")
+    import build_autoptn as ap
+    got = bytes(final[off(ap.CAVE):off(ap.CAVE) + len(ap_blob)])
+    assert got == ap_blob, "the autoptn blob was overwritten"
+    for site, _, _ in ap.DETOURS:
+        assert bytes(final[off(site):off(site) + 2]) == b"\x4e\xf9", f"autoptn detour 0x{site:08x} lost"
+    assert bytes(final[off(ap.COUNT_SITE):off(ap.COUNT_SITE) + 4]) == b"\x72\x14\x4e\x71", "menu count lost"
+    for table in (ap.MENU_LBL, ap.MENU_GET, ap.MENU_SET):
+        for idx in range(16, 20):
+            assert any(final[off(table + idx * 4):off(table + idx * 4) + 4]), f"menu entry {idx} empty"
+    print(f"  verified: autoptn blob ({len(ap_blob)} B), its detour, the menu count (20) and entries 17-20")
 
-    for f in (STEP_MAXO, STEP_ARP, STEP_DUAL, STEP_PERS):
+    for f in (STEP_MAXO, STEP_ARP, STEP_DUAL, STEP_PERS, STEP_SV):
         f.unlink(missing_ok=True)
     stock = STOCK.read_bytes()
     changed = sum(1 for a, b in zip(stock, final) if a != b)
     print(f"\n{OUT}: {len(final):,} bytes, {changed:,} changed vs stock")
     print("NEXT: gates ->  python3 tools/emu_check.py out/mainos_all.bin ; "
-          "python3 tools/verify_dual256.py ; python3 tools/audit_dual256.py")
+          "python3 tools/verify_dual256.py ; python3 tools/audit_dual256.py --img out/mainos_all.bin ; "
+          "python3 tools/emu_sliceview.py out/mainos_all.bin ; python3 tools/emu_led.py ; "
+          "python3 tools/emu_autoptn.py out/mainos_all.bin")
 
 
 if __name__ == "__main__":

@@ -3801,3 +3801,108 @@ refs; the track-LED painter reads it through its getter 0x40033970 at 0x40083ee2
 uses it to offset the track index by 8). All four sliceview gates and led_stub now test 0x80000012.
 Rebuilt as OCTAMAX_2c.
 
+
+## BANK AUTO PTN 1: a bank pick also picks pattern 1 — logs `out/ghidra_autoptn{,2}.log` [2026-10-25]
+**Request:** after `[BANK]` + trig the GUI waits in `BANK x: SELECT PTN`; the user wants pattern 1 of the
+chosen bank selected at once, behind a PERSONALIZE check like LAZY TRANSITIONS. Shipped as OCTAMAX_2d
+(`tools/patch_autoptn.s`, `tools/build_autoptn.py`, proof `tools/emu_autoptn.py`).
+
+**The bank window's state machine** (all in one page of code, 0x4007af30..0x4007b464):
+
+| global | meaning |
+|---|---|
+| `0x460e73c6` | phase: 0 pick bank, 1 bank picked / pick pattern, 2 pattern picked |
+| `0x460e73b8` | the bank picked (0..15) |
+| `0x460e73bc` | "armed": `[BANK]` released while the window is up -> countdown runs, trig press closes the window |
+| `0x460e73c2` | set on `[BANK]` press to `(armed == 0)`: press-again-to-exit |
+| `0x460e73c0` | word, bit per trig key held since the pattern pick (chaining + cleanup trigger) |
+
+- `[BANK]` press `FUN_4007af80` -> `FUN_4007af30`: phase 0, "SELECT BANK" window with close callback
+  `FUN_4007b408`, registers the trig-key handler node `0x400cff14` (key table `0x400cff34`: 16 entries,
+  stride 0x1a, each `press FUN_4007b2fc / release FUN_4007b434`) and the LED callback node `0x400cff28`.
+  `[BANK]` release `FUN_4007b3e0`: phase != 2 and toggle -> armed = 1 + countdown on; else close.
+- Trig press `FUN_4007b2fc(trig)`: phase 0 -> `BANK UNAVAILABLE` message if `*(0x4017d516 + trig*0x9b340)`,
+  else bank = trig, `FUN_4007b26c` (phase 1, sprintf "BANK %c: SELECT PTN", window, re-register, countdown
+  if armed). Phase != 0 -> if armed `FUN_40056b00` (close, no callback); mask == 0 -> `FUN_4009a404` +
+  **`FUN_400a1030(bank, trig)`** (-> `FUN_400a0570(bank, ptn, 0, -1, 0)`: queued while playing, immediate
+  when stopped) + 6 UI refreshes; mask != 0 -> `FUN_4009c634(trig)` = chain; then mask |= 1<<trig,
+  `FUN_40027de4`, phase 2.
+- Trig release `FUN_4007b434(trig)`: phase 2 -> mask &= ~(1<<trig); mask empty and armed -> `FUN_4007b408`
+  (armed = 0, unregister both nodes, `FUN_4007e998(0)`). With `[BANK]` held (armed 0) nothing happens
+  here; the `[BANK]` release closes the window through its callback instead.
+- Stock quirk: the mask is never cleared on open. A trig still held when `[BANK]` is pressed again keeps
+  its bank handlers across the key-table rebuild (`FUN_4003125c` leaves keys with state != 0 alone, state
+  2), so its release DOES reach `FUN_4007b434` — which ignores it because the phase is 0 again — and the
+  bit survives into the next session, whose first pattern press then takes the chain path. The auto path
+  clears the mask before its synthetic press (phase 0 = every bit is stale), so it does not inherit this.
+
+**Design.** Three ways to "press trig 1 for the user" were weighed: (a) jump into the phase-1 branch with
+d2 = 0 — reuses stock code but the mask then carries bit 0 and the bank trig's release never empties it,
+so the handlers stay registered and the bit goes stale; (b) synthetic press + synthetic release — clean,
+but the cleanup then runs on the press and the bank trig's release lands in the normal trig handler;
+(c) **clear the mask, synthetic press only, then set the mask to the bank's trig** — chosen: the
+machine is in exactly the state a real press of trig 1 leaves it in, except that the key it believes is
+held is the one the player is actually holding, so the stock release handler does the cleanup, chaining
+from the held bank trig works as from a held pattern key, and the `[BANK]`-held gesture is untouched (the
+window stays until `[BANK]` is released, as stock; a further trig picks another pattern normally).
+
+Hook: `0x4007b344 move.l D2,(0x460e73b8).l` — the bank store, last instruction of the phase-0 path, one
+6-byte instruction (hookcheck clean). `ap_stub`: replay the store, pop d2/a2 (stock epilogue), toggle off
+-> `jmp FUN_4007b26c` (the stock `bra.w`); on -> `jsr FUN_4007b26c`, `clr.w mask`, push 0,
+`jsr FUN_4007b2fc`, `mask = 1 << bank`, `rts` to the key dispatcher. (The first cut kept the stale bits —
+`(mask & ~1) | 1<<bank` — which the review showed turns the pick into a chain and strands the trig keys
+on the bank handler after the hold-across-[BANK] gesture; the clear must precede the synthetic press,
+because `FUN_4007b2fc` tests the mask before choosing select vs chain.) d2/a2 are restored before the nested
+calls and callee-saved through them. The "BANK x: SELECT PTN" window is created and, when armed, closed
+by `FUN_40056b00` inside the same key event — never rendered.
+
+**Flag:** `0x800000a8`, the last free word of the PERSONALIZE block (Ghidra: zero references to
+0x800000a8..ab and to its shadow 0x100fff38..3b; every other word 0x80000080..d0 is used — see
+`out/ghidra_autoptn2.log`). It sits inside the stock 0x64-byte boot restore, so persistence needs no
+further length change. The ANDY version-bump path (0x4001fa9a, version != 36) zero-fills only
+[0x10000000, 0x100fff00) and preserves the payload, and the defaults routine runs only on a checksum
+failure, so whatever an older OS once kept in that word survives on a never-re-defaulted unit. Hence ON
+means the value 1 exactly (hook and getter `cmp.l #1`), and the setter normalises (1 -> 0, anything
+else -> 1) instead of the `(v + delta) & 1` the other toggles use — same behaviour on a clean word, a
+defined state after one press on a stale one. The PERSONALIZE arrays are now FULL (entry 20 of 20,
+stride 0x50): the next toggle needs the three arrays re-relocated with a wider stride.
+
+**Menu count made unconditional.** Stock `FUN_40068fa8` hands the list `15 + (0x46c8d18c != 0)` items;
+`0x46c8d18c` is the MKII hardware-detect flag (written only by the boot GPIO probe at 0x4001f8cc /
+0x4001f910; the updater's MK1_OS_NOT_ALLOWED check reads it too) and in stock it hides entry 16, LED
+BRIGHTNESS, on a MKI. Every appended entry since r10 only bumped the immediate, so on a MKI the flag
+hid the LAST entry instead — this one. The builder now writes `moveq #20 ; nop` over
+`moveq #18 ; sub.l D0,D1` (0x40068fb2..b5), so all 20 entries show on either model.
+
+**Cave:** `0x400d7b60..0x400d7bec` (140 B), the tail of the original cave after the arp blob
+(0x400d7920 + 548 B = 0x400d7b44), limit 0x400d7c3c. build_all asserts the arp blob ends before it,
+verifies the blob, the detour, menu count `moveq #19` and entries 17..20 after the build.
+
+**Review (3 adversarial lenses + per-finding refutation, 2026-10-25):** 5 findings, all low / proof
+gaps, all fixed: stale-mask chain (above), ON == 1 + normalising setter (above), MKI count (above),
+`[BANK]`-held gesture documented in the README (the window stays up — closing it from the hook would
+either leave the handler nodes registered forever, `FUN_40056a70` skips the callback on a zero handle,
+or unregister the trig handler while the trig is still held), and the proof extended to drive the REAL
+key dispatcher `FUN_40031734` + rebuild `FUN_4003125c` (the first cut called `FUN_4007b434` directly).
+
+**Validation:** `tools/emu_autoptn.py` drives the REAL `FUN_4007b2fc` from the built image with the
+window / LED / sequencer entries stubbed (modelled side effects: window alloc returns a handle, free
+zeroes it) and the list / window / sprintf code run for real. Toggle off: 36 cases (bank 0..15 x
+`[BANK]` up/held, phases 1 and 2, unavailable bank) give the same call log, globals and window text as
+stock. Toggle on: one `FUN_400a1030(bank, 0)`, window closed when armed / kept while `[BANK]` is held,
+phase 2, mask = 1<<bank, trig handlers still registered; the bank trig's release empties the mask and
+unregisters both nodes; `[BANK]` release in the held gesture closes through the callback; a trig pressed
+while the bank trig is held takes the chain path; banks 0 and 15; phase 1/2 and BANK UNAVAILABLE stay
+identical to stock; a stale held-key bit still selects; flag words 2 / -1 / 0x80000000 read as OFF and
+one setter press lands on 1; getter/setter write runtime + shadow. Dispatcher section: with a synthetic
+"normal trig" handler node in front of the bank node and the real `FUN_40031734` / `FUN_4003125c`, the
+bank trig's press reaches the bank handler, its release reaches `FUN_4007b434`, the cleanup unregisters
+the bank node and the per-key tables point at the normal handler again; the hold-across-[BANK] gesture
+no longer leaves a chain; `[BANK]` held with both release orders ends clean; a countdown expiry after the
+auto pick (handle already 0) is a no-op; toggle off through the dispatcher equals stock. All other gates
+GREEN (emu_check, verify_dual256 200/200, audit clean, emu_sliceview, emu_led 7/7). Packaged
+out/OCTAMAX_2d.{syx,bin}; sysex/patches/octamax-2.0-beta.json regenerated, round-trip byte-identical.
+**Not yet on hardware.** Test list: toggle on, `[BANK]` tap then trig N while playing (change at the
+pattern boundary, no window left); same while stopped; `[BANK]` held + trig N (window stays until
+`[BANK]` up, then a second trig picks another pattern); hold trig N and press M (chain P1 -> PM); bank
+with no patterns (BANK UNAVAILABLE); toggle off = stock; toggle survives a power cycle.
