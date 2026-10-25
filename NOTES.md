@@ -3902,7 +3902,7 @@ no longer leaves a chain; `[BANK]` held with both release orders ends clean; a c
 auto pick (handle already 0) is a no-op; toggle off through the dispatcher equals stock. All other gates
 GREEN (emu_check, verify_dual256 200/200, audit clean, emu_sliceview, emu_led 7/7). Packaged
 out/OCTAMAX_2d.{syx,bin}; sysex/patches/octamax-2.0-beta.json regenerated, round-trip byte-identical.
-**Not yet on hardware.** Test list: toggle on, `[BANK]` tap then trig N while playing (change at the
+**Confirmed on hardware (2026-10-25, MKII, flashed as OCTAMAX_2d from the CF card).** Test list used: toggle on, `[BANK]` tap then trig N while playing (change at the
 pattern boundary, no window left); same while stopped; `[BANK]` held + trig N (window stays until
 `[BANK]` up, then a second trig picks another pattern); hold trig N and press M (chain P1 -> PM); bank
 with no patterns (BANK UNAVAILABLE); toggle off = stock; toggle survives a power cycle.
