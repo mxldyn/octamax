@@ -30,16 +30,16 @@ grows into someone else's block fails the build instead of the unit.
 
     python3 tools/build_all.py            # -> out/mainos_all.bin
 
-Packaging (the release is branded OCTAMAX_2d; the ELEK version field holds 10 chars):
+Packaging (the release is branded OCTAMAX_2e; the ELEK version field holds 10 chars):
 
-    EFT_EMIT_CONTAINER=out/elek_octamax2d.bin vendor/elektron-firmware-tool/elektron-firmware-tool \
+    EFT_EMIT_CONTAINER=out/elek_octamax2e.bin vendor/elektron-firmware-tool/elektron-firmware-tool \
         -i downloads/extracted/OCTATRACK_OS1.40C.syx -c 3 out/mainos_all.bin \
-        -V OCTAMAX_2d -o out/OCTAMAX_2d.syx
-    python3 tools/make_bin.py out/elek_octamax2d.bin -o out/OCTAMAX_2d.bin --expect-version OCTAMAX_2d
-    python3 tools/make_patch_json.py --img out/mainos_all.bin --syx out/OCTAMAX_2d.syx \
+        -V OCTAMAX_2e -o out/OCTAMAX_2e.syx
+    python3 tools/make_bin.py out/elek_octamax2e.bin -o out/OCTAMAX_2e.bin --expect-version OCTAMAX_2e
+    python3 tools/make_patch_json.py --img out/mainos_all.bin --syx out/OCTAMAX_2e.syx \
         --patch sysex/patches/octamax-2.0-beta.json
 
-Boot splash and SYSTEM STATUS -> OS VERSION then read OCTAMAX_2d instead of the r10 build's
+Boot splash and SYSTEM STATUS -> OS VERSION then read OCTAMAX_2e instead of the r10 build's
 MAXOLYDIAN, so the combined image is identifiable on the unit.
 
 Gates after a build: emu_check, verify_dual256, audit_dual256 --img out/mainos_all.bin,

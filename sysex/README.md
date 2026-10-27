@@ -31,7 +31,7 @@ script produces a `.syx` byte-identical to the reference build.
 python3 sysex/apply_patch.py \
     -i downloads/extracted/OCTATRACK_OS1.40C.syx \
     -p sysex/patches/octamax-2.0-beta.json \
-    -o OCTAMAX_2d.syx --bin OCTAMAX_2d.bin
+    -o OCTAMAX_2e.syx --bin OCTAMAX_2e.bin
 
 # version 1.x — the behaviour patches only (this is the default patch)
 python3 sysex/apply_patch.py \
@@ -43,8 +43,8 @@ python3 sysex/apply_patch.py \
 [1/5] stock .syx checksum ok
 [2/5] extracted section_3_MAIN_OS.bin (1,112,560 bytes)
 [3/5] applied 229 hunks (5643 bytes)
-[4/5] repacked -> OCTAMAX_2d.syx
-      CF image  -> OCTAMAX_2d.bin
+[4/5] repacked -> OCTAMAX_2e.syx
+      CF image  -> OCTAMAX_2e.bin
 [5/5] output checksum ok — byte-identical to the reference build
 ```
 

@@ -116,7 +116,7 @@ alt="MIDI ARP SETUP with the key scale on C lydian (LYD)">
 </p>
 
 The behaviour switches live in the **PERSONALIZE** menu, unchecked by default. The unit
-reports `OCTAMAX_2d` in the boot splash and under SYSTEM STATUS → OS VERSION.
+reports `OCTAMAX_2e` in the boot splash and under SYSTEM STATUS → OS VERSION.
 
 **[How to build your flashable file →](#1-the-fast-path--apply-the-pre-built-patch)**
 
@@ -251,11 +251,11 @@ freshly flashed unit is indistinguishable from stock until you opt in:
 | **Lazy transitions** | On a pattern change to a different Part, sounding tracks keep the previous Part's sound (no volume jump). The track LED dims while the track hasn't been re-trigged since the change; a trig commits it to the destination Part. Also keeps the A/B scene pointers on the same slots across the change. |
 | **No BANK/PTN countdown** | The SELECT BANK / SELECT PATTERN windows stop expiring after four seconds. |
 | **Arp key scales** | The MIDI arpeggiator's key-scale (ARP SETUP, F knob) gains 10 extra qualities beyond the stock major/minor: the five Greek modes (Dorian, Phrygian, Lydian, Mixolydian, Locrian) plus blues, phrygian-dominant, melodic-minor, octatonic and hirajoshi — 12 qualities × 12 roots. `OFF`/`maj`/`min` stay byte-identical to stock, so the extra scales only appear if you scroll the F knob past them. |
-| **Slice playhead** | *(new in 2.0)* The SRC>SLICES view shows the playing slice number in a trig-key frame, a live progress bar and the slice's loop point; the playing slice's trig button lights amber and pulses with the tempo LED. |
+| **Slice playhead** | *(new in 2.0)* The SRC>SLICES view shows the playing slice number in a trig-key frame, a live progress bar and the slice's loop point; the playing slice's trig button lights amber and pulses with the tempo LED. While grid recording (`[REC]`) is on, the trig keys show steps and the slice LED stays off *(fixed in 2e)*. |
 | **Bank auto ptn 1** | *(new in 2d)* Picking a bank in SELECT BANK also selects its pattern 1 and closes the window, instead of waiting in `BANK x: SELECT PTN`. |
 | **PERSONALIZE options** | The four behavior switches (lazy transitions, no countdown, slice playhead, bank auto ptn 1), added to the PERSONALIZE menu, unchecked by default and persistent across power cycles and OS upgrades. |
 | **256 STATIC slots** | *(new in 2.0)* Sample slots 129–256, with slices, track assignment, parameter locks and persistence across a power cycle. Always on — it extends capacity rather than changing behaviour. Written up in [`DUAL256.md`](DUAL256.md). |
-| **Boot branding** | Boot splash and SYSTEM STATUS show `OCTAMAX_2d` instead of `1.40C`. |
+| **Boot branding** | Boot splash and SYSTEM STATUS show `OCTAMAX_2e` instead of `1.40C`. |
 
 The behaviour switches are the ones that stay off until you opt in; the extra arp scales only
 appear if you scroll past `OFF`/`maj`/`min`, and the extra slots simply exist.
@@ -324,7 +324,7 @@ Three commands, from a clean clone:
 python3 sysex/apply_patch.py \
     -i downloads/extracted/OCTATRACK_OS1.40C.syx \
     -p sysex/patches/octamax-2.0-beta.json \
-    -o OCTAMAX_2d.syx --bin OCTAMAX_2d.bin
+    -o OCTAMAX_2e.syx --bin OCTAMAX_2e.bin
 ```
 
 ```
@@ -334,8 +334,8 @@ target : Elektron Octatrack MKII OS 1.40C
 [1/5] stock .syx checksum ok
 [2/5] extracted section_3_MAIN_OS.bin (1,112,560 bytes)
 [3/5] applied 223 hunks (4587 bytes)
-[4/5] repacked -> OCTAMAX_2d.syx
-      CF image  -> OCTAMAX_2d.bin
+[4/5] repacked -> OCTAMAX_2e.syx
+      CF image  -> OCTAMAX_2e.bin
 [5/5] output checksum ok — byte-identical to the reference build
 ```
 

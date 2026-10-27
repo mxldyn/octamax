@@ -42,6 +42,9 @@
                                     | shared with the MIDI pages (ARP setup is also view 3),
                                     | so every hook must stand down while it is set.
     .equ MODAL,     0x460d1aec      | non-zero = popup/overlay open
+    .equ GRIDREC,   0x460d1736      | non-zero = grid recording ([REC] step edit). Toggled by the
+                                    | key handler 0x40048774; the trig-LED refresher tests it first
+                                    | and paints steps (page 0x460d1e04), but VIEW keeps its value.
     .equ UIQ,       0x460d17ae      | the UI task's message queue
     .equ POST,      0x40000c3c      | post(queue, msg) — interrupt-masked ring insert
 
@@ -320,12 +323,15 @@ sv_tick_out:
 | =============================== trig LED ===============================
 | sv_ledid: d0 = led id (2 * (slice & 15), the red die of the trig's pair) when the
 | feature is live: flag on, SLICES view on screen, this track's voice active, playing a
-| slice, and that slice on the visible page. Otherwise d0 = -1 (N set). Clobbers d0/d1/a0
+| slice, and that slice on the visible page, and neither MIDI mode nor grid REC (both
+| repaint the trig keys with something else). Otherwise d0 = -1 (N set). Clobbers d0/d1/a0
 | only, so it is callable from both hook contexts below.
 sv_ledid:
     tst.l   F_SLICEVIEW
     beq.b   sl_no
     tst.l   MIDIMODE                | MIDI mode: the trig LEDs belong to the MIDI track
+    bne.b   sl_no
+    tst.l   GRIDREC                 | grid REC: the trig LEDs show steps, VIEW still says 3
     bne.b   sl_no
     moveq   #3,%d0
     cmp.l   VIEW,%d0

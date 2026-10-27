@@ -42,6 +42,7 @@ LED_SITE, LED_RESUME = 0x400444fc, 0x40044502
 BEAT_SITE, BEAT_RESUME = 0x40056f24, 0x40056f2a
 PAGE = 0x460d16f4
 MIDIMODE = 0x80000012
+GRIDREC = 0x460d1736              # grid recording ([REC] step edit); VIEW stays 3
 
 SETTINGS_FAKE = 0x100d5b30          # any RAM address works; use the real STATIC base
 
@@ -273,6 +274,7 @@ def run_led(site, resume, **voice_kw):
     w32(uc, VIEW, voice_kw.pop("view", 3))
     w32(uc, PAGE, voice_kw.pop("page", 0))
     w32(uc, MIDIMODE, voice_kw.pop("midi", 0))
+    w32(uc, GRIDREC, voice_kw.pop("rec", 0))
     if voice_kw:
         setup_voice(uc, **voice_kw)
     uc.reg_write(UC_M68K_REG_A7, sp0)
@@ -307,6 +309,10 @@ uc, pc, calls = run_led(LED_SITE, LED_RESUME, page=1, midi=1,
                         track=2, active=True, slice_idx=21, pos=0, start=0, end=100, loop=-1 & 0xFFFFFFFF)
 check("MIDI mode: no LED calls, d3/d4 preserved", pc == LED_RESUME and not calls and
       uc.reg_read(UC_M68K_REG_D3) == 0x1111 and uc.reg_read(UC_M68K_REG_D4) == 0x2222)
+uc, pc, calls = run_led(LED_SITE, LED_RESUME, page=1, rec=1,
+                        track=2, active=True, slice_idx=21, pos=0, start=0, end=100, loop=-1 & 0xFFFFFFFF)
+check("grid REC: no LED calls (trig keys show steps), d3/d4 preserved", pc == LED_RESUME and
+      not calls and uc.reg_read(UC_M68K_REG_D3) == 0x1111 and uc.reg_read(UC_M68K_REG_D4) == 0x2222)
 
 # ---------------- trig LED: beat pulse rides the tempo-LED arm ----------------
 print("beat pulse")
@@ -339,6 +345,14 @@ w32(uc, sp0 - 8, 0x26); w32(uc, sp0 - 4, 3)
 pc = run_to(uc, BEAT_SITE, {BEAT_RESUME})
 fl = [a[:2] for f, a in calls if f == LEDFLASH]
 check("MIDI mode: only the stock tempo flash", pc == BEAT_RESUME and fl == [[0x26, 3]], str(fl))
+uc, calls = mk()
+w32(uc, F_FLAG, 1); w32(uc, VIEW, 3); w32(uc, PAGE, 0); w32(uc, GRIDREC, 1)
+setup_voice(uc, track=0, active=True, slice_idx=7, pos=0, start=0, end=100, loop=-1 & 0xFFFFFFFF)
+uc.reg_write(UC_M68K_REG_A7, sp0 - 8)
+w32(uc, sp0 - 8, 0x26); w32(uc, sp0 - 4, 3)
+pc = run_to(uc, BEAT_SITE, {BEAT_RESUME})
+fl = [a[:2] for f, a in calls if f == LEDFLASH]
+check("grid REC: only the stock tempo flash", pc == BEAT_RESUME and fl == [[0x26, 3]], str(fl))
 
 # ---------------- menu getter/setter ----------------
 print("menu")

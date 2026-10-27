@@ -3906,3 +3906,28 @@ out/OCTAMAX_2d.{syx,bin}; sysex/patches/octamax-2.0-beta.json regenerated, round
 pattern boundary, no window left); same while stopped; `[BANK]` held + trig N (window stays until
 `[BANK]` up, then a second trig picks another pattern); hold trig N and press M (chain P1 -> PM); bank
 with no patterns (BANK UNAVAILABLE); toggle off = stock; toggle survives a power cycle.
+
+
+## Grid REC guard for the slice-playhead trig LED (OCTAMAX_2e) [2026-10-27]
+
+**Report:** with SLICE PLAYHEAD on, the sequencer step indicator looked red in SRC>SLICES but
+turned amber once `[REC]` (grid recording) was on, suspected as a regression from the slice playhead.
+
+**Finding:** the amber step in REC is STOCK. The trig-LED refresher FUN_40043fdc tests
+`0x460d1736` first: that is the **grid-recording flag** (key handler 0x40048774; it was mislabelled
+"MIDI mode" on 2026-09-26). Its branch paints the steps with FUN_40034bd4 (step page 0x460d1e04),
+loads d3 = d4 = 15 and falls into the common tail 0x400444fc. The playhead overlay at the end of the
+refresher uses d3/d4 as red/green brightness: 15/0 = red on the normal view arms, 15/15 = amber
+in grid REC. Emulated on the stock image: REC off -> step red, REC on -> step amber.
+
+**The real leak:** VIEW 0x460d16f0 keeps its value (3 = SLICES) under grid REC, so sv_ledid (sv_led
+at 0x400444fc + sv_beat) still painted the playing slice's trig amber and beat-blinked it over the
+step grid. With one slice per step the extra LED moves with the playhead and reads as "the step
+indicator went amber".
+
+**Fix:** `tst.l 0x460d1736 ; bne sl_no` in sv_ledid (8 B). The sliceview blob is now 854 B,
+0x400d70a8 .. 0x400d73fd, **2 B before the helper family at 0x400d7400**: the cave is full. emu_sliceview
+gained grid-REC cases for sv_led and sv_beat. Gates: emu_check ALL GREEN, verify_dual256 200/200,
+audit clean, emu_sliceview ALL GREEN, emu_led 7/7, emu_autoptn ALL GREEN. Packaged
+out/OCTAMAX_2e.{syx,bin}; JSON regenerated, round-trip byte-identical.
+**Confirmed on hardware (2026-10-27, MKII, flashed as OCTAMAX_2e from the CF card).**
