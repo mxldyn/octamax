@@ -31,7 +31,7 @@ script produces a `.syx` byte-identical to the reference build.
 python3 sysex/apply_patch.py \
     -i downloads/extracted/OCTATRACK_OS1.40C.syx \
     -p sysex/patches/octamax-2.0-beta.json \
-    -o OCTAMAX_2e.syx --bin OCTAMAX_2e.bin
+    -o OCTAMAX_2f.syx --bin OCTAMAX_2f.bin
 
 # version 1.x — the behaviour patches only (this is the default patch)
 python3 sysex/apply_patch.py \
@@ -42,9 +42,9 @@ python3 sysex/apply_patch.py \
 ```
 [1/5] stock .syx checksum ok
 [2/5] extracted section_3_MAIN_OS.bin (1,112,560 bytes)
-[3/5] applied 229 hunks (5643 bytes)
-[4/5] repacked -> OCTAMAX_2e.syx
-      CF image  -> OCTAMAX_2e.bin
+[3/5] applied 231 hunks (5815 bytes)
+[4/5] repacked -> OCTAMAX_2f.syx
+      CF image  -> OCTAMAX_2f.bin
 [5/5] output checksum ok — byte-identical to the reference build
 ```
 
@@ -61,7 +61,7 @@ per-hunk byte verification always holds.
 
 | patch | size | contents |
 |---|---|---|
-| `patches/octamax-2.0-beta.json` | 5,643 B in 229 hunks (0.51%) | everything below **plus the 256 STATIC slots, the slice playhead view, bank auto ptn 1 and persistent PERSONALIZE toggles** |
+| `patches/octamax-2.0-beta.json` | 5,815 B in 231 hunks (0.52%) | everything below **plus the 256 STATIC slots, the slice playhead view, bank auto ptn 1 and persistent PERSONALIZE toggles** |
 | `patches/maxolydian-r10.json` | 1,175 B in 22 hunks (0.11%) | the behaviour patches only |
 
 | id | source | effect |

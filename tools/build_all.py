@@ -59,6 +59,7 @@ STEP_ARP = pathlib.Path("out/_all_arp.bin")        # + arp scales
 STEP_DUAL = pathlib.Path("out/_all_dual.bin")      # + dual-256
 STEP_PERS = pathlib.Path("out/_all_pers.bin")      # + 256 persistence
 STEP_SV = pathlib.Path("out/_all_sv.bin")          # + slice playhead
+STEP_AP = pathlib.Path("out/_all_ap.bin")          # + bank auto ptn 1
 
 # --- relocations (see the map above) ---
 BOOT_STUB_AT = 0x400d6ba0
@@ -89,7 +90,7 @@ def apply_maxolydian(img):
     return blocks
 
 
-LED_AT, LED_LIMIT = 0x400d6800, 0x400d6900   # r10 block: patch_led, up to patch_notimer
+LED_AT, LED_LIMIT = 0x400d6800, 0x400d6860   # r10 block: patch_led; aedkey owns 0x400d6860..0x400d6900
 
 
 def rebuild_led_stub(img, maxo_blocks):
@@ -160,11 +161,17 @@ def main():
 
     # 6) BANK AUTO PTN 1 (claims the 20th, last PERSONALIZE entry; cave after the arp blob)
     print()
-    ap = run_module("build_autoptn", {"SRC": STEP_SV, "OUT": OUT})
+    ap = run_module("build_autoptn", {"SRC": STEP_SV, "OUT": STEP_AP})
     ap_blob = pathlib.Path("out/patch_autoptn.bin").read_bytes()
     assert ARP_AT + len(arp_blob) <= ap.CAVE, "the arp blob runs into the autoptn cave"
 
-    # 7) verify nothing grew into anybody else's block
+    # 7) the AED key publishes the current track's slot before opening (track copy -> stale editor)
+    print()
+    ak = run_module("build_aedkey", {"SRC": STEP_AP, "OUT": OUT})
+    ak_blob = pathlib.Path("out/patch_aedkey.bin").read_bytes()
+    assert LED_LIMIT <= ak.CAVE, "led_stub's limit runs into the aedkey cave"
+
+    # 8) verify nothing grew into anybody else's block
     print()
     final = OUT.read_bytes()
     for va, end, new in maxo_blocks:
@@ -203,8 +210,13 @@ def main():
         for idx in range(16, 20):
             assert any(final[off(table + idx * 4):off(table + idx * 4) + 4]), f"menu entry {idx} empty"
     print(f"  verified: autoptn blob ({len(ap_blob)} B), its detour, the menu count (20) and entries 17-20")
+    got = bytes(final[off(ak.CAVE):off(ak.CAVE) + len(ak_blob)])
+    assert got == ak_blob, "the aedkey blob was overwritten"
+    for site, _, _, _ in ak.DETOURS:
+        assert bytes(final[off(site):off(site) + 2]) == b"\x4e\xf9", f"aedkey detour 0x{site:08x} lost"
+    print(f"  verified: aedkey blob ({len(ak_blob)} B) and its {len(ak.DETOURS)} detours intact")
 
-    for f in (STEP_MAXO, STEP_ARP, STEP_DUAL, STEP_PERS, STEP_SV):
+    for f in (STEP_MAXO, STEP_ARP, STEP_DUAL, STEP_PERS, STEP_SV, STEP_AP):
         f.unlink(missing_ok=True)
     stock = STOCK.read_bytes()
     changed = sum(1 for a, b in zip(stock, final) if a != b)

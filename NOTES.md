@@ -3931,3 +3931,32 @@ gained grid-REC cases for sv_led and sv_beat. Gates: emu_check ALL GREEN, verify
 audit clean, emu_sliceview ALL GREEN, emu_led 7/7, emu_autoptn ALL GREEN. Packaged
 out/OCTAMAX_2e.{syx,bin}; JSON regenerated, round-trip byte-identical.
 **Confirmed on hardware (2026-10-27, MKII, flashed as OCTAMAX_2e from the CF card).**
+
+
+## AED key opens the editor on the current track's slot (OCTAMAX_2f) [2026-11-07]
+
+**Report:** after copying track 4 to track 5, enabling slices on T5 and triggering a slice with the
+AED open, the unit threw `EXCEPTION SSP:4 VEC:04 FS:0 SR:2000 ADDR:460E789C R0178` (illegal
+instruction; the PC was inside the CF browser filename pool 0x460e76ac; `R0178` is the build number
+ELEK0178). Reproducible symptom: after the copy, the AED showed another waveform under `STATIC 004`.
+
+**Measurement** (tools/build_diag_wave1.py + emu_diag_wave1.py, probe log mirrored into project.256
+0x21000): the waveform build for slot 4 opened and finished fine. The bank showed the copy had changed
+T5's slot 4 -> 28: `STATIC 004` was T5's OLD slot, not a wrong waveform for the right slot.
+
+**Root cause (stock):** the AED edits whatever (type, slot) was last handed to 0x4006de34. Every way
+in publishes first (slot list 0x4003d434, recorder 0x4002ee2c, browser 0x40078a94, [TRACK]+AED
+0x40083dae) except the AED key toggle 0x4006e274 (key table 0x400c080e) and the open-on-SLICES
+shortcut 0x4006e250 (0x400bf9b8). Those reuse the publish made at track select (0x40083bf8 ->
+0x40083c64), so a copy/paste or part reload without a re-select leaves the editor on the old slot.
+The VEC:04 crash happened in that state; not reproduced since.
+
+**Fix:** tools/patch_aedkey.s (146 B at 0x400d6860, build_all step 7; LED_LIMIT lowered to
+0x400d6860). When either key OPENS the editor, publish the current track's (type, slot) with the
+same arithmetic as 0x40083c64; closing and every other path stay stock. Behaviour change: the AED
+key after opening the editor from the slot list now shows the track's slot, not the list's.
+tools/emu_aedkey.py compares against the firmware's own track-select publish on the same image:
+ALL GREEN, and FAILS on the 2e image. Gates: emu_check, verify_dual256 200/200, audit clean,
+emu_sliceview, emu_led, emu_autoptn, emu_aedkey all green. Packaged out/OCTAMAX_2f.{syx,bin}; JSON
+regenerated, round-trip byte-identical.
+**Confirmed on hardware (2026-11-07, MKII, flashed as OCTAMAX_2f from the CF card).**
