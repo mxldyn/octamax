@@ -17,12 +17,16 @@ fixed (its hunks are a released, checksummed patch) and relocates the other two 
     0x400d6b00 .. 0x400d6b9e   dual-256 gap stubs                   (unchanged)
     0x400d6ba0 ..              dual-256 boot init                   (moved from 0x400d64e0)
     0x400d6c00 .. 0x400d6f9e   dual-256 sidecar                     (moved from 0x400d6600)
+    0x400d6996 .. 0x400d6a00   ptnrestart .ra (rs_pick)             (build_ptnrestart.py)
     0x400d7000 .. 0x400d702a   dual-256 allocator stub              (unchanged)
+    0x400d702a .. 0x400d7080   ptnrestart .rb (rs_same, rs_take)    (build_ptnrestart.py)
     0x400d7080 ..              serializer 256-extension             (moved from 0x400d6a00)
     0x400d70a8 .. 0x400d73f6   slice playhead                       (build_sliceview.py)
     0x400d7400 .. 0x400d7788   dual-256 helper family               (unchanged)
+    0x400d7788 .. 0x400d77c0   ptnrestart .rd (rs_pend, RS_FLAG)    (build_ptnrestart.py)
     0x400d77c0 / 0x400d7800    load-loop stub / token+AED stubs      (unchanged)
     0x400d7920 ..              arp scales                           (moved from 0x400d7000)
+    0x400d7be6 .. 0x400d7c3c   ptnrestart .rc (rs_entry, rs_led)    (build_ptnrestart.py)
 
 The layout is asserted, not assumed: after the build every maxolydian hunk, the arp blob and the arp
 detours are read back out of the finished image and compared byte for byte, so a future stub that
@@ -30,20 +34,21 @@ grows into someone else's block fails the build instead of the unit.
 
     python3 tools/build_all.py            # -> out/mainos_all.bin
 
-Packaging (the release is branded OCTAMAX_2e; the ELEK version field holds 10 chars):
+Packaging (the release is branded OCTAMAX_2g; the ELEK version field holds 10 chars):
 
-    EFT_EMIT_CONTAINER=out/elek_octamax2e.bin vendor/elektron-firmware-tool/elektron-firmware-tool \
+    EFT_EMIT_CONTAINER=out/elek_octamax2g.bin vendor/elektron-firmware-tool/elektron-firmware-tool \
         -i downloads/extracted/OCTATRACK_OS1.40C.syx -c 3 out/mainos_all.bin \
-        -V OCTAMAX_2e -o out/OCTAMAX_2e.syx
-    python3 tools/make_bin.py out/elek_octamax2e.bin -o out/OCTAMAX_2e.bin --expect-version OCTAMAX_2e
-    python3 tools/make_patch_json.py --img out/mainos_all.bin --syx out/OCTAMAX_2e.syx \
+        -V OCTAMAX_2g -o out/OCTAMAX_2g.syx
+    python3 tools/make_bin.py out/elek_octamax2g.bin -o out/OCTAMAX_2g.bin --expect-version OCTAMAX_2g
+    python3 tools/make_patch_json.py --img out/mainos_all.bin --syx out/OCTAMAX_2g.syx \
         --patch sysex/patches/octamax-2.0-beta.json
 
-Boot splash and SYSTEM STATUS -> OS VERSION then read OCTAMAX_2e instead of the r10 build's
+Boot splash and SYSTEM STATUS -> OS VERSION then read OCTAMAX_2g instead of the r10 build's
 MAXOLYDIAN, so the combined image is identifiable on the unit.
 
 Gates after a build: emu_check, verify_dual256, audit_dual256 --img out/mainos_all.bin,
-emu_sliceview out/mainos_all.bin, emu_led, emu_autoptn out/mainos_all.bin.
+emu_sliceview out/mainos_all.bin, emu_led, emu_autoptn out/mainos_all.bin,
+emu_aedkey out/mainos_all.bin, emu_ptnrestart out/mainos_all.bin.
 """
 import json, pathlib, subprocess, sys
 
@@ -60,6 +65,7 @@ STEP_DUAL = pathlib.Path("out/_all_dual.bin")      # + dual-256
 STEP_PERS = pathlib.Path("out/_all_pers.bin")      # + 256 persistence
 STEP_SV = pathlib.Path("out/_all_sv.bin")          # + slice playhead
 STEP_AP = pathlib.Path("out/_all_ap.bin")          # + bank auto ptn 1
+STEP_AK = pathlib.Path("out/_all_ak.bin")          # + AED key fix
 
 # --- relocations (see the map above) ---
 BOOT_STUB_AT = 0x400d6ba0
@@ -167,11 +173,17 @@ def main():
 
     # 7) the AED key publishes the current track's slot before opening (track copy -> stale editor)
     print()
-    ak = run_module("build_aedkey", {"SRC": STEP_AP, "OUT": OUT})
+    ak = run_module("build_aedkey", {"SRC": STEP_AP, "OUT": STEP_AK})
     ak_blob = pathlib.Path("out/patch_aedkey.bin").read_bytes()
     assert LED_LIMIT <= ak.CAVE, "led_stub's limit runs into the aedkey cave"
 
-    # 8) verify nothing grew into anybody else's block
+    # 8) [PTN] + the playing pattern cues a restart (four small holes of the main cave)
+    print()
+    rs = run_module("build_ptnrestart", {"SRC": STEP_AK, "OUT": OUT})
+    rs_blobs = {s: pathlib.Path(f"out/patch_ptnrestart{s.replace('.', '_')}.bin").read_bytes()
+                for s in rs.SECTIONS}
+
+    # 9) verify nothing grew into anybody else's block
     print()
     final = OUT.read_bytes()
     for va, end, new in maxo_blocks:
@@ -215,8 +227,15 @@ def main():
     for site, _, _, _ in ak.DETOURS:
         assert bytes(final[off(site):off(site) + 2]) == b"\x4e\xf9", f"aedkey detour 0x{site:08x} lost"
     print(f"  verified: aedkey blob ({len(ak_blob)} B) and its {len(ak.DETOURS)} detours intact")
+    for sec, (lo, _) in rs.SECTIONS.items():
+        blob = rs_blobs[sec]
+        assert bytes(final[off(lo):off(lo) + len(blob)]) == blob, f"ptnrestart block {sec} was overwritten"
+    for site, _, _, _, op in rs.DETOURS:
+        assert bytes(final[off(site):off(site) + 2]) == op, f"ptnrestart detour 0x{site:08x} lost"
+    print(f"  verified: ptnrestart blocks ({sum(map(len, rs_blobs.values()))} B in {len(rs_blobs)}) "
+          f"and its {len(rs.DETOURS)} detours intact")
 
-    for f in (STEP_MAXO, STEP_ARP, STEP_DUAL, STEP_PERS, STEP_SV, STEP_AP):
+    for f in (STEP_MAXO, STEP_ARP, STEP_DUAL, STEP_PERS, STEP_SV, STEP_AP, STEP_AK):
         f.unlink(missing_ok=True)
     stock = STOCK.read_bytes()
     changed = sum(1 for a, b in zip(stock, final) if a != b)

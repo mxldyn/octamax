@@ -3960,3 +3960,45 @@ ALL GREEN, and FAILS on the 2e image. Gates: emu_check, verify_dual256 200/200, 
 emu_sliceview, emu_led, emu_autoptn, emu_aedkey all green. Packaged out/OCTAMAX_2f.{syx,bin}; JSON
 regenerated, round-trip byte-identical.
 **Confirmed on hardware (2026-11-07, MKII, flashed as OCTAMAX_2f from the CF card).**
+
+## PTN restart: [PTN] + the playing pattern cues a restart (OCTAMAX_2g) [2026-11-09]
+
+**Request:** with p5 playing (64 steps, CHAIN BEHAVIOR 16), `[PTN]` + p5 should restart p5 at the
+end of the current 16-step window, the same moment `[PTN]` + p6 would switch to p6.
+
+**Stock model:** current bank/ptn at 0x800065bd/be, cued bank/ptn at 0x800065bf/c0; "nothing cued"
+is cued == current, so cueing the playing pattern (FUN_400a0570, playing path 0x400a06d6) is a
+no-op, and it is how stock cancels a cue. Per step (0x400a42fa..0x400a43a0) the sequencer takes the
+window d4 from table 0x400d80dc[pattern byte +0x8e56, <0 -> global 0x8000004e] and pending d6 =
+cued != current; pending && step % d4 == 0 -> switch at 0x400a43a0, otherwise switch only at the
+length. The switch reloads the step counter 0x800065b2 from the start offset (0x400a483a), so the
+loop restart at the end is itself a switch to cued == current, and a switch to the same pattern IS
+a restart (no part reload). The one-step-ahead twin at 0x400a4154 (arranger + MIDI PC pre-send) is
+left alone; the program change out is deduplicated anyway.
+
+**Fix:** tools/patch_ptnrestart.s (280 B in four free holes: .ra 0x400d6996, .rb 0x400d702a,
+.rc 0x400d7be6 — both now FULL — and .rd 0x400d7788 with RS_FLAG/RS_SAME at 0x400d77b8/9),
+build_all step 8. One byte RS_FLAG = "restart cued":
+- rs_pick 0x40056b68 (PTN trig handler's `jsr 0x400a1030`, mask==0 path): a pick of the playing
+  pattern while playing, not in arranger mode (0x460d1aec), with nothing cued toggles the flag;
+  any other pick clears it. The stock call still runs (on copies of its args; 0x400a1030
+  clobbers its own argument slots).
+- rs_entry 0x400a0570 (cue function prologue): every other cue (STOP 0x400a10c8, MIDI PC in,
+  project load, arranger, bank window) clears the flag; rs_pick marks its own call via RS_SAME.
+- rs_pend 0x400a432a: pending |= RS_FLAG. rs_take 0x400a43a0: the switch consumes the flag
+  (window or pattern end, whichever comes first).
+- rs_led 0x4003549e (pattern-trig LED painter 0x400353d4): with the flag set, the playing
+  pattern's trig is painted through the stock cued branch 0x400354b8.
+Always on (PERSONALIZE arrays are full; stock ignores that press). The bank window path 0x4007b37c
+is not hooked.
+
+**Validation:** tools/emu_ptnrestart.py, 24 cases against the same image with the detours reverted:
+the real PTN path 0x40056b68 -> 0x400a0570 (sequencer globals 0x80006500..0x80006700 equal to
+stock, flag toggle/cancel/clear), the decision block (switch at steps 16/32/48 with the flag, not
+at 33; no flag = stock), and the LED painter (only the playing trig gains the cued bit). ALL GREEN,
+FAILS on the 2f image. Gates: emu_check, verify_dual256 200/200, audit clean, emu_sliceview,
+emu_led, emu_autoptn, emu_aedkey, emu_ptnrestart all green. Packaged out/OCTAMAX_2g.{syx,bin};
+JSON regenerated (235 hunks, 6122 B), round-trip byte-identical.
+**Confirmed on hardware (2026-11-09, MKII, flashed as OCTAMAX_2g from the CF card):** restart at
+the window, second press cancels, another pattern switches normally, STOP then PLAY starts clean,
+LED shows the cue at once, arranger and MIDI mode unaffected.
