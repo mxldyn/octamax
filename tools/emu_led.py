@@ -1,16 +1,21 @@
 #!/usr/bin/env python3
-# Valida patch_led.bin: un track EN TRANSICION se pinta con brillo reducido.
-# Lo critico aca es el stack: FUN_40083eb0 no popea por llamada, limpia 0x20 al
-# final, asi que el stub tiene que empujar exactamente 16 bytes y no limpiar nada.
-import pathlib, struct
+# Valida led_stub en la imagen final: un track EN TRANSICION se pinta con brillo reducido.
+# En transicion = restore_stub lo protegio (LZ_SNAPOK) y su (banco, part) por track todavia
+# difiere del activo (lz_dirty, en el bloque de escenas). Lo critico es el stack:
+# FUN_40083eb0 no popea por llamada, limpia 0x20 al final, asi que el stub tiene que
+# empujar exactamente 16 bytes y no limpiar nada.
+#     python3 tools/emu_led.py [out/mainos_all.bin]
+import pathlib, struct, sys
 from unicorn import *
 from unicorn.m68k_const import *
 
 STUB_ADDR = 0x400d6800
-STUB = pathlib.Path("out/patch_led.bin").read_bytes()
+IMG = pathlib.Path(sys.argv[1] if len(sys.argv) > 1 else "out/mainos_all.bin").read_bytes()
+BASE = 0x40000400
 RESUME = 0x40083fc4
-TRK_PART = 0x8000182a
-ACT_PART = 0x80000002
+TRK_BANK, TRK_PART = 0x8000182a, 0x80001832
+ACT_BANK, ACT_PART = 0x80000002, 0x80000003
+SNAPOK = 0x40af0228            # tools/patch_ram.inc LZ_SNAPOK
 SETLEVEL = 0x400135b0          # A3 apunta aca
 LVL_NORM, LVL_DIRTY = 0xF, 0x5
 
@@ -18,18 +23,22 @@ LVL_NORM, LVL_DIRTY = 0xF, 0x5
 MIDI_MODE = 0x80000012
 
 
-def run(track, part_of_track, active_part, lazy=1, midi=0):
+def run(track, part_of_track, active_part, lazy=1, midi=0, bank=3, active_bank=3, snapok=1):
     uc = Uc(UC_ARCH_M68K, UC_MODE_BIG_ENDIAN)
     uc.mem_map(0x40000000, 0x400000)
+    uc.mem_write(BASE, IMG)
     uc.mem_map(0x80000000, 0x20000)
     uc.mem_map(0x41000000, 0x20000)
+    uc.mem_map(0x40af0000, 0x1000)       # patch RAM block (tools/patch_ram.inc)
     uc.mem_map(0x46000000, 0x200000)
     uc.mem_write(MIDI_MODE, struct.pack('>I', midi))
-    uc.mem_write(STUB_ADDR, STUB)
     # FUN_400135b0 simulado: un rts, para capturar los argumentos ya empujados
     uc.mem_write(SETLEVEL, b"\x4e\x75")
     uc.mem_write(TRK_PART + track, bytes([part_of_track]))
     uc.mem_write(ACT_PART, bytes([active_part]))
+    uc.mem_write(TRK_BANK + track, bytes([bank]))
+    uc.mem_write(ACT_BANK, bytes([active_bank]))
+    uc.mem_write(SNAPOK + track, bytes([snapok]))
     uc.mem_write(0x800000d8, struct.pack('>I', lazy))   # PERSONALIZE: LAZY TRANSITIONS
     uc.mem_write(0x800000d8, struct.pack('>I', lazy))
 
@@ -106,12 +115,18 @@ def check(name, r, want_lvl):
 
 check("1 track NO en transicion (part 1 == activo 1): brillo normal",
       run(track=3, part_of_track=1, active_part=1), LVL_NORM)
-check("2 track EN transicion (part 1 != activo 2): brillo reducido",
+check("2 track EN transicion (part 1 != activo 2, mismo banco): brillo reducido",
       run(track=3, part_of_track=1, active_part=2), LVL_DIRTY)
 check("3 track 0, en transicion",
-      run(track=0, part_of_track=5, active_part=0), LVL_DIRTY)
+      run(track=0, part_of_track=3, active_part=0), LVL_DIRTY)
 check("4 track 7 (ultimo), no en transicion",
-      run(track=7, part_of_track=4, active_part=4), LVL_NORM)
+      run(track=7, part_of_track=2, active_part=2), LVL_NORM)
+check("4b otro banco, misma part: en transicion",
+      run(track=5, part_of_track=1, active_part=1, bank=2, active_bank=7), LVL_DIRTY)
+check("4c sin foto valida (arranque: bytes 0xFF): brillo normal",
+      run(track=5, part_of_track=0xff, active_part=1, bank=0xff, active_bank=0, snapok=0), LVL_NORM)
+check("4d foto valida pero el trig ya lo puso al dia: brillo normal",
+      run(track=2, part_of_track=1, active_part=1, snapok=1), LVL_NORM)
 
 check("5 GATE apagado: brillo de fabrica aunque este en transicion",
       run(track=3, part_of_track=1, active_part=2, lazy=0), LVL_NORM)

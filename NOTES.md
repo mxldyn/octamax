@@ -4002,3 +4002,63 @@ JSON regenerated (235 hunks, 6122 B), round-trip byte-identical.
 **Confirmed on hardware (2026-11-09, MKII, flashed as OCTAMAX_2g from the CF card):** restart at
 the window, second press cancels, another pattern switches normally, STOP then PLAY starts clean,
 LED shows the cue at once, arranger and MIDI mode unaffected.
+
+## LAZY state RAM clash + LAZY TRANSITIONS review (OCTAMAX_2h) [2026-11-09]
+
+**Report:** `EXCEPTION SSP:4 VEC:03 FS:4 SR:2000 ADDR:40031940` while the sequencer ran, after a
+pattern change and a press on scene A; separately, with LAZY on, scene A sometimes showed nothing
+selected after a pattern change and some tracks went silent. Not reproducible on demand.
+
+**Crash site:** 0x40031940 is the `rts` of the stock key dispatcher FUN_40031734(key, pressed)
+(handler table 0x46c7d8de, stride 24, 64 keys): its return address on the stack was corrupted.
+Same signature as the September crash at 0x4007e900.
+
+**Root cause found (the crash itself is NOT proven to come from it):** the patches kept their
+state at 0x80006a00..0x80007000 (LZ save buffer, per-track part copy, playing flags, destination
+snapshot, sticky scene bytes, LED temp, slice-playhead timers). 0x80000000..0x80008000 is the
+program's .data/.bss in internal SRAM, initialised at boot (0x4000f938) from the image tail
+0x401086f4..0x4010fdf0, with no free holes. That range lies inside the work buffer
+0x80006964..0x80007574 of the stock audio analysis task FUN_40098a5c (created at 0x40098a2c,
+0x2000-byte stack); FUN_40098388 writes up to 768 words from 0x80006974. Whenever it ran it
+overwrote the saved track parameters (silent / wrong-sounding tracks on restore), the per-track
+part bytes and the sticky scene state (scene A "nothing selected").
+
+**Fix — relocation:** all patch state moved to DDR 0x40af0000..0x40af0600, inside the dual-256
+reserve [0x40a955e0, 0x40af55e0) (SET-B ends at 0x40ab93e0), which the stock OS never references
+and the bootzero stub (0x4001fa64) clears every boot. One shared layout, `tools/patch_ram.inc`,
+included by patch.s, patch_enc.s, patch_scene2.s, patch_led.s and patch_sliceview.s. build_all now
+reassembles the four r10 LAZY blocks from source (R10_SOURCES, entry addresses pinned by
+R10_ENTRIES, LZ_DIRTY chained from the scene2 symbols via --defsym) and fails if any non-stock
+4-byte operand points into 0x80006964..0x80007574.
+
+**Index meanings (verified):** 0x80000002 = active BANK (0..15), 0x80000003 = active PART (0..3).
+apply_part(bank, part) = FUN_40009094, args stored at 0x80001828/29; per-track bank[8] at
+0x8000182a, per-track part[8] at 0x80001832 (boot 0xFF). Stock's "track is current" test checks
+both (0x40052c50).
+
+**LAZY review — fixed:**
+1. enc_apply and led_stub compared only the bank byte, so a part change within the same bank never
+   dimmed or committed a track. New helper `lz_dirty` (scene2 block, 0x400d67d0): SNAPOK[t] &&
+   (bank[t] != ACT_BANK || part[t] != ACT_PART); Z flag = not dirty. Used by both.
+2. restore_stub protected tracks on every apply_part call, including re-applies of the current part
+   (0x4002b59a, 0x4002b8f8, 0x4004a8fc, manual scene assign), so those edits were reverted. Now a
+   track is protected only when its own (bank, part) actually changes.
+3. An encoder move could commit a snapshot that was never taken (boot 0xFF bytes, a track that was
+   not protected, a stale one). New per-track LZ_SNAPOK[8]: set by restore_stub when it parks the
+   destination params, cleared on commit and on every apply_part pass.
+4. enc_apply runs in the UI task while apply_part runs from the pattern-change caller (0x400907e4);
+   the commit (voice copy + both index bytes + SNAPOK) now runs with SR = 0x2700.
+
+**Known, not changed:** save_stub samples the pulsing voice-active byte once, so a track silent at
+that instant is not protected; scene2 LAST_P stores only the part number, so scenes are not kept
+sticky across banks that land on the same part number.
+
+**Validation:** new tools/emu_lazy.py (restore_stub from 0x400d6542 to the 0x40000c3c post, and
+enc_apply from trampoline 0x400d6600 to resume 0x40052ea0: registers, SP, saved frame, voice, DEST,
+index bytes, SNAPOK, SR) and emu_led.py rewritten to run on the final image (10 cases incl.
+cross-bank, no-snapshot, already-committed). Both fail on the 2g image. Gates: emu_check,
+verify_dual256 200/200, audit clean, emu_sliceview, emu_led, emu_autoptn, emu_aedkey,
+emu_ptnrestart, emu_scene2, emu_image, emu_lazy all green. Relocation-only diff vs 2g = 30
+remapped operands. Packaged out/OCTAMAX_2h.{syx,bin}; JSON regenerated (233 hunks, 6220 B),
+round-trip byte-identical.
+**Confirmed on hardware (2026-11-09, MKII, flashed as OCTAMAX_2h from the CF card):** works well.

@@ -31,9 +31,10 @@
 
     .equ F_SLICEVIEW, 0x800000dc    | free word in the battery-backed PERSONALIZE block
 
-    .equ BLINKCTR,  0x80006c68      | long: timer ticks (paces the post retry)
-    .equ POSTED,    0x80006c6c      | byte: one redraw message outstanding
-    .equ POSTTIME,  0x80006c70      | long: BLINKCTR at last post, for the retry
+    .include "tools/patch_ram.inc"
+    .equ BLINKCTR,  SV_BLINKCTR     | long: timer ticks (paces the post retry)
+    .equ POSTED,    SV_POSTED      | byte: one redraw message outstanding
+    .equ POSTTIME,  SV_POSTTIME      | long: BLINKCTR at last post, for the retry
 
     .equ VIEW,      0x460d16f0      | FUNC+[down] view index, 3 = SLICES
     .equ MIDIMODE,  0x80000012      | non-zero = MIDI mode ([MIDI] key toggles it at 0x4005555c,

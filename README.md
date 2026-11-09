@@ -41,6 +41,16 @@ that copy.
 
 ### What's new
 
+**LAZY TRANSITIONS — fixes.** *(fixed in 2h)* The lazy-transition, sticky-scene, dimmed-LED
+and slice-playhead state used to sit in a RAM area that a stock audio analysis task also
+uses as its work buffer, so it could be overwritten mid-set: tracks went silent or jumped to the
+wrong sound, and scene A could end up with nothing selected after a pattern change. The state now
+lives in a reserved memory block. The review that found it also fixed: a part change *within
+the same bank* now keeps sounding tracks on their old sound (only bank changes worked before);
+editing the current part or assigning a scene while a track plays is no longer undone; an encoder
+move on a dimmed track now commits it to the new part, and never copies parameters that were
+not saved. Confirmed on hardware.
+
 **PTN RESTART — chain a pattern to itself.** *(new in 2g)* While a pattern is playing,
 `[PTN]` + its own trig cues a **restart**: at the next CHAIN BEHAVIOR window the pattern
 starts again from step 1, exactly where a `[PTN]` + another trig would switch patterns. With a
@@ -108,7 +118,7 @@ Everything from the previous release is still here, still **off by default**:
 
 - **Lazy transitions** — on a pattern change to a different Part, sounding tracks keep
   the previous Part's sound instead of jumping volume; the track LED dims until a trig
-  commits the track to the destination Part, and the A/B scene slots stay put across
+  or an encoder move commits the track to the destination Part, and the A/B scene slots stay put across
   the change.
 - **No BANK/PTN countdown** — the SELECT BANK / SELECT PATTERN windows stop expiring
   after four seconds; press the key again (or pick a trig) to close them.
@@ -126,7 +136,7 @@ alt="MIDI ARP SETUP with the key scale on C lydian (LYD)">
 </p>
 
 The behaviour switches live in the **PERSONALIZE** menu, unchecked by default. The unit
-reports `OCTAMAX_2g` in the boot splash and under SYSTEM STATUS → OS VERSION.
+reports `OCTAMAX_2h` in the boot splash and under SYSTEM STATUS → OS VERSION.
 
 **[How to build your flashable file →](#1-the-fast-path--apply-the-pre-built-patch)**
 
@@ -258,7 +268,7 @@ freshly flashed unit is indistinguishable from stock until you opt in:
 
 | feature | effect |
 |---|---|
-| **Lazy transitions** | On a pattern change to a different Part, sounding tracks keep the previous Part's sound (no volume jump). The track LED dims while the track hasn't been re-trigged since the change; a trig commits it to the destination Part. Also keeps the A/B scene pointers on the same slots across the change. |
+| **Lazy transitions** | On a pattern change to a different Part, sounding tracks keep the previous Part's sound (no volume jump). The track LED dims while the track is still on the old Part; a trig or an encoder move commits it to the destination Part. Works for part changes within a bank and across banks *(fixed in 2h)*. Also keeps the A/B scene pointers on the same slots across the change. |
 | **No BANK/PTN countdown** | The SELECT BANK / SELECT PATTERN windows stop expiring after four seconds. |
 | **Arp key scales** | The MIDI arpeggiator's key-scale (ARP SETUP, F knob) gains 10 extra qualities beyond the stock major/minor: the five Greek modes (Dorian, Phrygian, Lydian, Mixolydian, Locrian) plus blues, phrygian-dominant, melodic-minor, octatonic and hirajoshi — 12 qualities × 12 roots. `OFF`/`maj`/`min` stay byte-identical to stock, so the extra scales only appear if you scroll the F knob past them. |
 | **Slice playhead** | *(new in 2.0)* The SRC>SLICES view shows the playing slice number in a trig-key frame, a live progress bar and the slice's loop point; the playing slice's trig button lights amber and pulses with the tempo LED. While grid recording (`[REC]`) is on, the trig keys show steps and the slice LED stays off *(fixed in 2e)*. |
@@ -267,7 +277,7 @@ freshly flashed unit is indistinguishable from stock until you opt in:
 | **AED key on the current slot** | *(fixed in 2f)* The `[AUDIO EDITOR]` key opens the editor on the track's current sample. Stock reused the sample the track had when it was last selected, so after a track copy/paste or a part reload the editor showed the old sample's name, waveform and slices. |
 | **PERSONALIZE options** | The four behavior switches (lazy transitions, no countdown, slice playhead, bank auto ptn 1), added to the PERSONALIZE menu, unchecked by default and persistent across power cycles and OS upgrades. |
 | **256 STATIC slots** | *(new in 2.0)* Sample slots 129–256, with slices, track assignment, parameter locks and persistence across a power cycle. Always on — it extends capacity rather than changing behaviour. Written up in [`DUAL256.md`](DUAL256.md). |
-| **Boot branding** | Boot splash and SYSTEM STATUS show `OCTAMAX_2g` instead of `1.40C`. |
+| **Boot branding** | Boot splash and SYSTEM STATUS show `OCTAMAX_2h` instead of `1.40C`. |
 
 The behaviour switches are the ones that stay off until you opt in; the extra arp scales only
 appear if you scroll past `OFF`/`maj`/`min`, the extra slots simply exist, and PTN restart only
@@ -337,7 +347,7 @@ Three commands, from a clean clone:
 python3 sysex/apply_patch.py \
     -i downloads/extracted/OCTATRACK_OS1.40C.syx \
     -p sysex/patches/octamax-2.0-beta.json \
-    -o OCTAMAX_2g.syx --bin OCTAMAX_2g.bin
+    -o OCTAMAX_2h.syx --bin OCTAMAX_2h.bin
 ```
 
 ```
@@ -346,9 +356,9 @@ target : Elektron Octatrack MKII OS 1.40C
 
 [1/5] stock .syx checksum ok
 [2/5] extracted section_3_MAIN_OS.bin (1,112,560 bytes)
-[3/5] applied 235 hunks (6122 bytes)
-[4/5] repacked -> OCTAMAX_2g.syx
-      CF image  -> OCTAMAX_2g.bin
+[3/5] applied 233 hunks (6220 bytes)
+[4/5] repacked -> OCTAMAX_2h.syx
+      CF image  -> OCTAMAX_2h.bin
 [5/5] output checksum ok — byte-identical to the reference build
 ```
 

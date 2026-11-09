@@ -102,6 +102,7 @@ for site, elf, sym, resume, tag in DETOURS:
     uc.mem_map(0x80000000, 0x20000)
     uc.mem_map(0x10000000, 0x1000000)
     uc.mem_map(0x41000000, 0x20000)         # stack
+    uc.mem_map(0x40af0000, 0x1000)          # patch RAM block (tools/patch_ram.inc)
     uc.mem_write(BASE, IMG)
     uc.mem_write(0x46c82456, struct.pack(">I", 0x46d00000))   # base del proyecto
     uc.mem_write(0x800000d8, struct.pack(">I", 1))            # LAZY TRANSITIONS on

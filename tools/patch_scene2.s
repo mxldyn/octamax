@@ -38,11 +38,12 @@
 |   0x80006c62 STICKY_A 0x80006c63 STICKY_B   0x80006c64 HOLD
 | Cave: 0x400d6700 (past the GUI stubs, inside the free region that ends ~0x400d7c1c).
 
-    .equ LAST_P,   0x80006c60
-    .equ VALID,    0x80006c61
-    .equ STICKY_A, 0x80006c62
-    .equ STICKY_B, 0x80006c63
-    .equ HOLD,     0x80006c64
+    .include "tools/patch_ram.inc"
+    .equ LAST_P,   SC_LAST_P
+    .equ VALID,    SC_VALID
+    .equ STICKY_A, SC_STICKY_A
+    .equ STICKY_B, SC_STICKY_B
+    .equ HOLD,     SC_HOLD
     .equ HOLD_N,   4
 
     .equ PROJ_PTR, 0x46c82456
@@ -132,4 +133,32 @@ en_stamp:
 
     .short  0x4cd7, 0x030f             | movem.l (%sp),%d0-%d3/%a0-%a1
     lea     0x18(%sp),%sp
+    rts
+
+| ---- shared LAZY helper ----
+    .equ TRK_BANK, 0x8000182a          | per-track bank[8]
+    .equ TRK_PART, 0x80001832          | per-track part[8]
+    .equ ACT_BANK, 0x80000002          | active bank
+    .equ ACT_PART, 0x80000003          | active part
+| lz_dirty: d0 = track 0..7 -> Z clear if the track is in transition, Z set if not.
+| Keeps d0; clobbers d1 and a0 only (led_stub calls it with the LED painter's registers live).
+| Lives here for space; enc_apply (patch_enc.s) and led_stub (patch_led.s) call it through the
+| absolute address build_all passes them as LZ_DIRTY. A track is in transition when restore_stub
+| protected it (LZ_SNAPOK) and its per-track (bank, part) still differs from the active one;
+| stock tests both bytes the same way (0x40052c50).
+    .if TRK_PART - TRK_BANK - 8
+    .error "lz_dirty reads the per-track part as 8(TRK_BANK)"
+    .endif
+    .global lz_dirty
+lz_dirty:
+    lea     LZ_SNAPOK,%a0
+    tst.b   (%a0,%d0.l)
+    beq.b   ld_out                     | not protected: Z set
+    lea     TRK_BANK,%a0
+    mvz.b   (%a0,%d0.l),%d1
+    cmp.b   ACT_BANK,%d1
+    bne.b   ld_out                     | other bank: Z clear
+    mvz.b   8(%a0,%d0.l),%d1
+    cmp.b   ACT_PART,%d1               | other part: Z clear; same: Z set
+ld_out:
     rts

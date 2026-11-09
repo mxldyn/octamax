@@ -16,8 +16,8 @@ XF_RESUME  = 0x4003f1bc     # retorno de host 2
 PROJ   = 0x46d00000
 PTRLOC = 0x46c82456
 ACTPAT = 0x80000003
-LAST_P, VALID, STICKY_A, STICKY_B, HOLD = (0x80006c60, 0x80006c61,
-                                           0x80006c62, 0x80006c63, 0x80006c64)
+LAST_P, VALID, STICKY_A, STICKY_B, HOLD = (0x40af0260, 0x40af0261,   # tools/patch_ram.inc
+                                           0x40af0262, 0x40af0263, 0x40af0264)
 STRIDE, SEL = 0x18b2, 0x8ed90
 SEED = {UC_M68K_REG_D0: 0x11111111, UC_M68K_REG_D1: 0x22222222,
         UC_M68K_REG_D2: 0x33333333, UC_M68K_REG_D3: 0x44444444,
@@ -35,6 +35,7 @@ def run(entry, act_pat, state, live, extra_writes=None, lazy=1):
     uc.mem_map(0x46000000, 0x1000000)
     uc.mem_map(0x80000000, 0x20000)
     uc.mem_map(0x41000000, 0x20000)
+    uc.mem_map(0x40af0000, 0x1000)       # patch RAM block
     uc.mem_write(SCENE_STUB, STUB)
     uc.mem_write(PTRLOC, struct.pack(">I", PROJ))
     uc.mem_write(ACTPAT, bytes([act_pat]))
@@ -66,7 +67,7 @@ def run(entry, act_pat, state, live, extra_writes=None, lazy=1):
     wild = []
 
     def w(uc, acc, ad, sz, val, u):
-        if not (0x46000000 <= ad < 0x47000000 or 0x80006c00 <= ad < 0x80007000
+        if not (0x46000000 <= ad < 0x47000000 or 0x40af0000 <= ad < 0x40af0600
                 or 0x41000000 <= ad < 0x41020000):
             wild.append((hex(ad), sz, val))
 

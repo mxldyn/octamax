@@ -25,9 +25,9 @@ IMG_PATH = pathlib.Path(sys.argv[1] if len(sys.argv) > 1 else "out/mainos_slicev
 BASE = 0x40000400
 
 F_FLAG   = 0x800000dc
-BLINKCTR = 0x80006c68
-POSTED   = 0x80006c6c
-POSTTIME = 0x80006c70
+BLINKCTR = 0x40af0268   # tools/patch_ram.inc
+POSTED   = 0x40af026c
+POSTTIME = 0x40af0270
 VIEW     = 0x460d16f0
 MODAL    = 0x460d1aec
 UIQ      = 0x460d17ae
@@ -66,6 +66,7 @@ def mk():
     uc.mem_map(0x10000000, 0x100000)     # CURTRACK + fake SETTINGS live in 0x100xxxxx
     uc.mem_map(0x46000000, 0x1100000)    # VIEW/MODAL/UIQ/dirty/0x46104ca8
     uc.mem_map(0x41000000, 0x20000)      # stack
+    uc.mem_map(0x40af0000, 0x1000)       # patch RAM block (tools/patch_ram.inc)
     calls = []
 
     def hook(uc, addr, size, user):

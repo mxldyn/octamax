@@ -1,9 +1,10 @@
 | led_stub — dim the track LED while that track is IN TRANSITION.
 |
 | A track is "dirty" when it is still sounding with the SOURCE Part's parameters,
-| i.e. it has not been re-trigged since the pattern change. That is exactly
-| per_track_part[track] != active_Part — the same condition the GUI-in-transition
-| patch already uses and that is validated on hardware.
+| i.e. it has not been re-trigged since the pattern change: restore_stub protected it and its
+| per-track (bank, part) still differs from the active one. lz_dirty (patch_scene2.s) decides;
+| until OCTAMAX_2h this stub compared the bank alone, so a part change inside one bank never
+| dimmed anything.
 |
 | Why brightness and not colour: FUN_40083eb0 already uses all four 2-bit colour
 | states (0 off / 1 current track / 2 other sounding / 3 combination), but it passes
@@ -32,13 +33,12 @@
 | Bytes 0x40083fba..0x40083fc3 become dead; the stub replicates them and resumes at
 | 0x40083fc4.
 |
-| RAM: 0x80006c65 (one byte, adjacent to the scene v2 block at 0x80006c60..64).
+| RAM: LED_TMP in tools/patch_ram.inc.
 
-    .equ TRK_PART,  0x8000182a      | per_track_part[8], byte per track
-    .equ ACT_PART,  0x80000002      | active Part
     .equ MIDI_MODE, 0x80000012      | non-zero while the [MIDI] key mode is on (toggled 0x4005555c;
                                     | the painter itself reads it through 0x40033970). NOT 0x460d1736.
-    .equ BRIGHT_TMP,0x80006c65      | survives the call: FUN_400135b0 may clobber d0
+    .include "tools/patch_ram.inc"
+    .equ BRIGHT_TMP,LED_TMP         | survives the call: FUN_400135b0 may clobber d0
     .equ RESUME,    0x40083fc4      | back into the loop, at addq.l #1,D5
 
     .equ LVL_NORM,  0xf             | stock brightness
@@ -52,14 +52,10 @@ led_stub:
     beq.b   lb_norm
     tst.l   MIDI_MODE                  | modo MIDI: los T1..T8 son pistas MIDI, que no
     bne.b   lb_norm                    | participan en la transicion -> brillo de fabrica
-    | --- decide the level for this track ---
-    lea     TRK_PART,%a0
-    moveq   #0,%d1
-    move.b  (%a0,%d5.l),%d1            | d1 = per_track_part[track]
-    moveq   #0,%d0
-    move.b  ACT_PART,%d0               | d0 = active Part
-    cmp.l   %d0,%d1
-    beq.b   lb_norm                    | same Part -> not in transition
+    | --- decide the level for this track: lz_dirty (patch_scene2.s) keeps d0, clobbers d1/a0 ---
+    move.l  %d5,%d0
+    jsr     LZ_DIRTY
+    beq.b   lb_norm                    | not in transition
     moveq   #LVL_DIRTY,%d0
     bra.b   lb_emit
 lb_norm:

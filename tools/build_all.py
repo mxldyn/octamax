@@ -34,21 +34,22 @@ grows into someone else's block fails the build instead of the unit.
 
     python3 tools/build_all.py            # -> out/mainos_all.bin
 
-Packaging (the release is branded OCTAMAX_2g; the ELEK version field holds 10 chars):
+Packaging (the release is branded OCTAMAX_2h; the ELEK version field holds 10 chars):
 
-    EFT_EMIT_CONTAINER=out/elek_octamax2g.bin vendor/elektron-firmware-tool/elektron-firmware-tool \
+    EFT_EMIT_CONTAINER=out/elek_octamax2h.bin vendor/elektron-firmware-tool/elektron-firmware-tool \
         -i downloads/extracted/OCTATRACK_OS1.40C.syx -c 3 out/mainos_all.bin \
-        -V OCTAMAX_2g -o out/OCTAMAX_2g.syx
-    python3 tools/make_bin.py out/elek_octamax2g.bin -o out/OCTAMAX_2g.bin --expect-version OCTAMAX_2g
-    python3 tools/make_patch_json.py --img out/mainos_all.bin --syx out/OCTAMAX_2g.syx \
+        -V OCTAMAX_2h -o out/OCTAMAX_2h.syx
+    python3 tools/make_bin.py out/elek_octamax2h.bin -o out/OCTAMAX_2h.bin --expect-version OCTAMAX_2h
+    python3 tools/make_patch_json.py --img out/mainos_all.bin --syx out/OCTAMAX_2h.syx \
         --patch sysex/patches/octamax-2.0-beta.json
 
-Boot splash and SYSTEM STATUS -> OS VERSION then read OCTAMAX_2g instead of the r10 build's
+Boot splash and SYSTEM STATUS -> OS VERSION then read OCTAMAX_2h instead of the r10 build's
 MAXOLYDIAN, so the combined image is identifiable on the unit.
 
 Gates after a build: emu_check, verify_dual256, audit_dual256 --img out/mainos_all.bin,
 emu_sliceview out/mainos_all.bin, emu_led, emu_autoptn out/mainos_all.bin,
-emu_aedkey out/mainos_all.bin, emu_ptnrestart out/mainos_all.bin.
+emu_aedkey out/mainos_all.bin, emu_ptnrestart out/mainos_all.bin, emu_scene2, emu_image out/mainos_all.bin,
+emu_lazy out/mainos_all.bin.
 """
 import json, pathlib, subprocess, sys
 
@@ -98,27 +99,64 @@ def apply_maxolydian(img):
 
 LED_AT, LED_LIMIT = 0x400d6800, 0x400d6860   # r10 block: patch_led; aedkey owns 0x400d6860..0x400d6900
 
+# The LAZY TRANSITIONS blocks ship inside the released r10 hunks but are reassembled from source:
+# their RAM moved out of the stock analysis-task buffer (tools/patch_ram.inc, OCTAMAX_2h) and
+# led_stub gained a MIDI-mode gate. (source, address, limit, a detour that must point at it)
+R10_SOURCES = [
+    ("patch",        0x400d64e0, 0x400d6600, None),
+    ("patch_scene2", 0x400d6700, 0x400d6800, 0x40009094),   # before enc/led: it hosts lz_dirty
+    ("patch_enc",    0x400d6600, 0x400d6700, None),
+    ("patch_led",    LED_AT,     LED_LIMIT,  0x40083fb4),
+]
+# Entry points the released r10 detours jump to: a rebuilt block must keep each one in place.
+R10_ENTRIES = {
+    "patch": {"save_stub": 0x400d64e0, "restore_stub": 0x400d6542},
+    "patch_scene2": {"scene_stub": 0x400d6700, "xf_stub": 0x400d6712},
+    "patch_enc": {"enc_e98": 0x400d6600, "enc_ae8": 0x400d6612, "enc_498": 0x400d6624,
+                  "enc_a68": 0x400d6636, "enc_35c": 0x400d6648},
+    "patch_led": {"led_stub": 0x400d6800},
+}
+OLD_RAM = (0x80006964, 0x80007574)   # the analysis task's buffer: no patch may reference it
 
-def rebuild_led_stub(img, maxo_blocks):
-    """led_stub ships inside the released r10 hunks, but its source gained a MIDI-mode gate
-    (MIDI tracks never take part in a Part transition, so their T1..T8 LEDs must stay at the
-    stock level). Reassemble it from tools/patch_led.s over the r10 bytes and swap the block's
-    expectation so the byte-for-byte verification checks the new stub instead."""
-    subprocess.run(["m68k-elf-as", "-mcpu=5407", "-o", "out/patch_led.o", "tools/patch_led.s"], check=True)
-    subprocess.run(["m68k-elf-ld", f"-Ttext=0x{LED_AT:x}", "-o", "out/patch_led.elf", "out/patch_led.o"],
-                   capture_output=True)
-    subprocess.run(["m68k-elf-objcopy", "-O", "binary", "out/patch_led.elf", "out/patch_led.bin"], check=True)
-    blob = pathlib.Path("out/patch_led.bin").read_bytes()
-    assert LED_AT + len(blob) <= LED_LIMIT, f"led_stub {len(blob)} B overruns 0x{LED_LIMIT:08x}"
-    idx = [i for i, (va, _, _) in enumerate(maxo_blocks) if va == LED_AT]
-    assert len(idx) == 1, "r10 JSON has no hunk at the led_stub address"
-    va, end, old = maxo_blocks[idx[0]]
-    assert bytes(img[off(va):off(end)]) == old, "led_stub block is not the r10 bytes"
-    assert not any(img[off(end):off(LED_LIMIT)]), "bytes after the r10 led_stub are not free"
-    img[off(LED_AT):off(LED_AT) + len(blob)] = blob
-    assert int.from_bytes(img[off(0x40083fb4) + 2:off(0x40083fb4) + 6], "big") == LED_AT, "led detour lost"
-    maxo_blocks[idx[0]] = (LED_AT, LED_AT + len(blob), blob)
-    print(f"led_stub rebuilt from source: {len(blob)} B @ 0x{LED_AT:08x} (r10 had {len(old)} B), MIDI-mode gate")
+
+def assemble_at(name, at, defsyms=None):
+    defs = [f"--defsym={k}=0x{v:x}" for k, v in (defsyms or {}).items()]
+    subprocess.run(["m68k-elf-as", "-mcpu=5407", *defs, "-o", f"out/{name}.o", f"tools/{name}.s"],
+                   check=True)
+    subprocess.run(["m68k-elf-ld", f"-Ttext=0x{at:x}", "-o", f"out/{name}.elf", f"out/{name}.o"],
+                   capture_output=True, check=True)
+    subprocess.run(["m68k-elf-objcopy", "-O", "binary", "-j", ".text", f"out/{name}.elf",
+                    f"out/{name}.bin"], check=True)
+    nm = subprocess.run(["m68k-elf-nm", f"out/{name}.elf"], capture_output=True, text=True).stdout
+    syms = {p[2]: int(p[0], 16) for p in (l.split() for l in nm.splitlines()) if len(p) == 3}
+    return pathlib.Path(f"out/{name}.bin").read_bytes(), syms
+
+
+def rebuild_r10_blocks(img, maxo_blocks):
+    """Reassemble the r10 LAZY blocks over the released bytes and swap each block's expectation,
+    so the byte-for-byte verification checks the rebuilt code instead."""
+    defsyms = {}
+    for name, at, limit, detour in R10_SOURCES:
+        blob, syms = assemble_at(name, at, defsyms)
+        if "lz_dirty" in syms:
+            defsyms["LZ_DIRTY"] = syms["lz_dirty"]
+        for sym, want in R10_ENTRIES[name].items():
+            assert syms.get(sym) == want, f"{name}: {sym} moved to {syms.get(sym)} (r10 detour wants 0x{want:08x})"
+        assert at + len(blob) <= limit, f"{name} {len(blob)} B overruns 0x{limit:08x}"
+        idx = [i for i, (va, _, _) in enumerate(maxo_blocks) if va == at]
+        assert len(idx) == 1, f"r10 JSON has no hunk at 0x{at:08x} ({name})"
+        va, end, old = maxo_blocks[idx[0]]
+        assert bytes(img[off(va):off(end)]) == old, f"{name} block is not the r10 bytes"
+        assert not any(img[off(end):off(limit)]), f"bytes after the r10 {name} block are not free"
+        top = max(end, at + len(blob))
+        img[off(va):off(top)] = blob.ljust(top - va, b"\0")
+        if detour is not None:
+            assert int.from_bytes(img[off(detour) + 2:off(detour) + 6], "big") == at, f"{name} detour lost"
+        maxo_blocks[idx[0]] = (va, va + len(blob), blob)
+        same = "identical" if blob == old else f"changed ({len(old)} -> {len(blob)} B, limit {limit - at})"
+        print(f"  r10 {name:13s} rebuilt from source @ 0x{at:08x}: {same}")
+    # apply_part's exit: the jmp at 0x40009664 must land on restore_stub
+    assert int.from_bytes(img[off(0x40009666):off(0x4000966a)], "big") == 0x400d6542, "exit detour lost"
 
 
 def run_module(modname, overrides):
@@ -138,7 +176,7 @@ def main():
 
     # 1) the published behaviour patch, at its released addresses
     maxo_blocks = apply_maxolydian(img)
-    rebuild_led_stub(img, maxo_blocks)
+    rebuild_r10_blocks(img, maxo_blocks)
     STEP_MAXO.write_bytes(bytes(img))
 
     # 2) arp scales, relocated out of the dual-256 allocator stub's cave
@@ -234,6 +272,13 @@ def main():
         assert bytes(final[off(site):off(site) + 2]) == op, f"ptnrestart detour 0x{site:08x} lost"
     print(f"  verified: ptnrestart blocks ({sum(map(len, rs_blobs.values()))} B in {len(rs_blobs)}) "
           f"and its {len(rs.DETOURS)} detours intact")
+
+    stock = STOCK.read_bytes()
+    clash = [i + BASE for i in range(0, len(final) - 3, 2)
+             if final[i:i + 4] != stock[i:i + 4]
+             and OLD_RAM[0] <= int.from_bytes(final[i:i + 4], "big") < OLD_RAM[1]]
+    assert not clash, f"patch code still references the analysis buffer: {[hex(c) for c in clash]}"
+    print(f"  verified: no patch operand points into 0x{OLD_RAM[0]:08x}..0x{OLD_RAM[1]:08x}")
 
     for f in (STEP_MAXO, STEP_ARP, STEP_DUAL, STEP_PERS, STEP_SV, STEP_AP, STEP_AK):
         f.unlink(missing_ok=True)

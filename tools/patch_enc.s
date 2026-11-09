@@ -13,11 +13,11 @@
 | but each reserves a different frame and saves a different register set, so each needs its
 | own trampoline replaying its own displaced prologue:
 |
-|   0x40052e98   lea -0x20,sp ; movem.l d2-d5/a2-a3   -> resume 0x40052ea0
-|   0x40052ae8   lea -0x20,sp ; movem.l d2-d5/a2-a3   -> resume 0x40052af0
-|   0x40053498   lea -0x24,sp ; movem.l d2-d6/a2-a3   -> resume 0x400534a0
+|   0x40052e98   lea -0x20,sp ; movem.l d2-d7/a2-a3   -> resume 0x40052ea0
+|   0x40052ae8   lea -0x20,sp ; movem.l d2-d7/a2-a3   -> resume 0x40052af0
+|   0x40053498   lea -0x24,sp ; movem.l d2-d7/a2-a4   -> resume 0x400534a0
 |   0x40053a68   lea -0x2c,sp ; movem.l d2-d7/a2-a6   -> resume 0x40053a70
-|   0x4005435c   lea -0x28,sp ; movem.l d2-d7/a2-a3   -> resume 0x40054364
+|   0x4005435c   lea -0x28,sp ; movem.l d2-d7/a2-a5   -> resume 0x40054364
 |
 | Each is a 6-byte jmp over an 8-byte prologue; the 2 leftover bytes are dead because the
 | trampoline resumes at +8.
@@ -33,12 +33,13 @@
 
     .equ F_LAZY,     0x800000d8      | PERSONALIZE: LAZY TRANSITIONS
     .equ CUR_TRACK,  0x100b14cc
-    .equ TRK_PART,   0x8000182a      | per_track_part[8]
-    .equ TRK_PAT,    0x80001832      | per_track_pattern[8]
-    .equ ACT_PART,   0x80000002
-    .equ ACT_PAT,    0x80000003
+    .equ TRK_BANK,   0x8000182a      | per-track bank[8]  (apply_part arg 1, via 0x80001828)
+    .equ TRK_PART,   0x80001832      | per-track part[8]  (apply_part arg 2, via 0x80001829)
+    .equ ACT_BANK,   0x80000002      | active bank (0..15)
+    .equ ACT_PART,   0x80000003      | active part (0..3)
     .equ VOICE,      0x80000a50      | voice buffer, 0x40 per track
-    .equ DEST_SNAP,  0x80006e00      | destination params parked by restore_stub (0x200 B)
+    .include "tools/patch_ram.inc"
+    .equ DEST_SNAP,  LZ_DEST         | destination params parked by restore_stub (0x200 B)
 
     .cpu 5407
     .text
@@ -50,7 +51,7 @@ _start:
 enc_e98:
     bsr.w   enc_apply
     .short  0x4fef, 0xffe0          | lea -0x20(a7),a7
-    .short  0x48d7, 0x0cfc          | movem.l d2-d5/a2-a3,(a7)
+    .short  0x48d7, 0x0cfc          | movem.l d2-d7/a2-a3,(a7)
     jmp     0x40052ea0
 
 enc_ae8:
@@ -62,7 +63,7 @@ enc_ae8:
 enc_498:
     bsr.w   enc_apply
     .short  0x4fef, 0xffdc          | lea -0x24(a7),a7
-    .short  0x48d7, 0x1cfc          | movem.l d2-d6/a2-a3,(a7)
+    .short  0x48d7, 0x1cfc          | movem.l d2-d7/a2-a4,(a7)
     jmp     0x400534a0
 
 enc_a68:
@@ -74,10 +75,13 @@ enc_a68:
 enc_35c:
     bsr.w   enc_apply
     .short  0x4fef, 0xffd8          | lea -0x28(a7),a7
-    .short  0x48d7, 0x3cfc          | movem.l d2-d7/a2-a3,(a7)
+    .short  0x48d7, 0x3cfc          | movem.l d2-d7/a2-a5,(a7)
     jmp     0x40054364
 
 | ---------------- shared logic ----------------
+| A track is in transition when restore_stub protected it (LZ_SNAPOK) and stock has not
+| re-applied it since: its (bank, part) still differs from the active one. Stock tests both
+| bytes the same way (0x40052c50); testing only the bank missed every same-bank part change.
 enc_apply:
     lea     -0x18(%sp),%sp          | ColdFire: no movem with -(An)
     .short  0x48d7, 0x030f          | movem.l d0-d3/a0-a1,(sp)
@@ -88,33 +92,33 @@ enc_apply:
     moveq   #0,%d0
     move.b  CUR_TRACK,%d0
     andi.l  #7,%d0                  | 8 tracks; clamp so a stray value cannot index out
-    lea     TRK_PART,%a0
-    moveq   #0,%d1
-    move.b  (%a0,%d0.l),%d1         | per_track_part[track]
-    moveq   #0,%d2
-    move.b  ACT_PART,%d2
-    cmp.l   %d2,%d1
+    move.l  %d0,%d2
+    jsr     LZ_DIRTY                | in the scene block (patch_scene2.s); address from the build
     beq.b   ea_out                  | not in transition -> nothing to do
 
-    move.l  %d0,%d3
-    lsl.l   #6,%d3                  | track * 0x40
+    move.w  %sr,%d3                 | the pattern change runs in another task: commit the
+    move.w  #0x2700,%sr             | track's buffer and index bytes in one piece
+    move.l  %d2,%d0
+    lsl.l   #6,%d0                  | track * 0x40
     lea     DEST_SNAP,%a0
-    adda.l  %d3,%a0
+    adda.l  %d0,%a0
     lea     VOICE,%a1
-    adda.l  %d3,%a1
+    adda.l  %d0,%a1
     moveq   #16,%d1                 | 0x40 bytes = 16 longs
 ea_copy:
     move.l  (%a0)+,(%a1)+
     subq.l  #1,%d1
     bne.b   ea_copy
 
+    mvz.b   ACT_BANK,%d0
+    lea     TRK_BANK,%a0
+    move.b  %d0,(%a0,%d2.l)         | the track is now on the active bank ...
+    mvz.b   ACT_PART,%d0
     lea     TRK_PART,%a0
-    move.b  %d2,(%a0,%d0.l)         | per_track_part[track] = active Part
-    moveq   #0,%d2
-    move.b  ACT_PAT,%d2
-    lea     TRK_PAT,%a0
-    move.b  %d2,(%a0,%d0.l)         | per_track_pattern[track] = active pattern
-
+    move.b  %d0,(%a0,%d2.l)         | ... and part
+    lea     LZ_SNAPOK,%a0
+    clr.b   (%a0,%d2.l)             | snapshot consumed
+    move.w  %d3,%sr
 
 ea_out:
     .short  0x4cd7, 0x030f          | movem.l (sp),d0-d3/a0-a1
