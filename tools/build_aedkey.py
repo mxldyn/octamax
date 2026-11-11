@@ -15,6 +15,9 @@ Hooks:
     0x4006e274  ak_toggle  the AED key toggle (key-table entry 0x400c080e), 6 B: tstl 0x460e5e4c
     0x4006e250  ak_slices  the open-on-slices shortcut (key-table entry 0x400bf9b8), 8 B:
                            pea 1 ; jsr %pc@(0x4006db58)
+    0x4006214e  ak_part    pattern-change handler, 6 B: jsr 0x4002e5ac (-> jsr ak_part)
+    0x40062248  ak_part    part-change handler,    6 B: jsr 0x4002e5ac (-> jsr ak_part)
+                           (OCTAMAX_2i: with the editor open, republish the track's slot)
 Cave: 0x400d6860..0x400d6900, the free tail of the r10 led_stub block (build_all.LED_LIMIT stops
 led_stub at 0x400d6860 so the two can never overlap).
 """
@@ -33,7 +36,10 @@ DETOURS = [
     # site,        symbol,      expected original bytes,  hole
     (0x4006e274, "ak_toggle", "4ab9460e5e4c", 6),          # tstl 0x460e5e4c
     (0x4006e250, "ak_slices", "487800014ebaf902", 8),      # pea 1 ; jsr %pc@(0x4006db58)
+    (0x4006214e, "ak_part",   "4eb94002e5ac", 6),          # pattern change: jsr 0x4002e5ac
+    (0x40062248, "ak_part",   "4eb94002e5ac", 6),          # part change:    jsr 0x4002e5ac
 ]
+CALLS = {"ak_part"}       # detoured with jsr (the stub tail-jumps to the displaced callee)
 
 
 def off(a):
@@ -69,7 +75,7 @@ def main():
         o = off(site)
         if bytes(img[o:o + n]).hex() != exp:
             sys.exit(f"detour 0x{site:08x} unexpected: {bytes(img[o:o+n]).hex()} (want {exp})")
-        img[o:o + 6] = b"\x4e\xf9" + syms[sym].to_bytes(4, "big")
+        img[o:o + 6] = (b"\x4e\xb9" if sym in CALLS else b"\x4e\xf9") + syms[sym].to_bytes(4, "big")
         if n == 8:
             img[o + 6:o + 8] = b"\x4e\x71"
         print(f"  detour 0x{site:08x} -> {sym} 0x{syms[sym]:08x}")

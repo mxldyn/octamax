@@ -7,6 +7,10 @@ stop where the stock code would go next, and assert:
     for the same bank/part/track -- run on the same image as the reference -- then opens;
   * AED open   -> no publish, stock close / stock flow;
   * stack delta matches the stock flow, every register is preserved.
+And for the part-change sites (0x4006214e pattern change, 0x40062248 part change, OCTAMAX_2i):
+  * AED open   -> publishes what track select would for the NEW part, then calls 0x4002e5ac
+    returning to the handler;
+  * AED closed -> no publish, straight into 0x4002e5ac.
 """
 import pathlib, struct, sys
 from unicorn import *
@@ -22,6 +26,7 @@ SENT = {k: 0x5e000000 + i * 0x1111 for i, k in enumerate(sorted(R))}
 
 PUBLISH, OPEN, CLOSE, PAGEOK = 0x4006de34, 0x4006e160, 0x4006dd18, 0x4006db58
 TOGGLE, SLICES, SLICES_RESUME = 0x4006e274, 0x4006e250, 0x4006e258
+PART_SITES, PART_NEXT = (0x4006214e, 0x40062248), 0x4002e5ac
 AEDOPEN, BANKPTR, G_PART, G_TRACK = 0x460e5e4c, 0x46c82456, 0x100b14cf, 0x100b14cc
 BANK = 0x41100000
 FAILS = []
@@ -156,6 +161,22 @@ def case_slices(name, part, track, mtype, slots, aed_open):
     check(name, p)
 
 
+def case_part(name, site, part, track, mtype, slots, aed_open):
+    uc = mk(part, track, mtype, slots, aed_open)
+    sp0 = 0x41010000
+    st = run(uc, site, {PART_NEXT}, sp0)
+    p = []
+    if "err" in st or st.get("at") != PART_NEXT:
+        return check(name, [f"did not reach {PART_NEXT:#x}: {st.get('err')}"])
+    if st["sp"] != sp0 - 4 or r32(uc, sp0 - 4) != site + 6:
+        p.append(f"sp {st['sp']:#x} / ret {r32(uc, st['sp']):#x}, expected a call returning to {site + 6:#x}")
+    want = [reference(part, track, mtype, slots)] if aed_open else []
+    if st["pub"] != want:
+        p.append(f"published {st['pub']}, expected {want}")
+    p += kept(st)
+    check(name, p)
+
+
 # the HW case: bank part 0, track 5 (index 4), static, slot 28 (index 27) after the copy
 case_toggle("AED key, closed, T5 static slot 28: publishes (0, 27) like track select, then opens",
             0, 4, 0, [27, 0, 0, 0, 0x84], 0)
@@ -165,5 +186,11 @@ case_toggle("AED key, closed, high static slot 200 (dual-256)", 1, 2, 0, [199, 0
 case_toggle("AED key, closed, thru machine (type 2): same as stock", 0, 1, 2, [3, 4, 0, 0, 0x81], 0)
 case_slices("slices shortcut, closed: publishes first, then the stock page check", 0, 4, 0, [27, 0, 0, 0, 0x84], 0)
 case_slices("slices shortcut, open: no publish, stock flow", 0, 4, 0, [27, 0, 0, 0, 0x84], 0x46100000)
+for site, what in zip(PART_SITES, ("pattern change", "part change")):
+    case_part(f"{what}, AED open, part 2 T3 static slot 41: republishes (0, 40)", site,
+              2, 2, 0, [40, 0, 0, 0, 0x83], 0x46100000)
+    case_part(f"{what}, AED open, high static slot 200 (dual-256)", site, 1, 6, 0, [199, 0, 0, 0, 0x87], 0x46100000)
+    case_part(f"{what}, AED open, flex slot 12", site, 3, 0, 1, [0, 11, 0, 0, 0x80], 0x46100000)
+    case_part(f"{what}, AED closed: no publish, stock call", site, 2, 2, 0, [40, 0, 0, 0, 0x83], 0)
 print("\nALL GREEN" if not FAILS else "FAILED: " + ", ".join(FAILS))
 sys.exit(1 if FAILS else 0)

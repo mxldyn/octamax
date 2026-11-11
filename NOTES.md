@@ -4062,3 +4062,32 @@ emu_ptnrestart, emu_scene2, emu_image, emu_lazy all green. Relocation-only diff 
 remapped operands. Packaged out/OCTAMAX_2h.{syx,bin}; JSON regenerated (233 hunks, 6220 B),
 round-trip byte-identical.
 **Confirmed on hardware (2026-11-09, MKII, flashed as OCTAMAX_2h from the CF card):** works well.
+
+## AED follows pattern / bank / part changes (OCTAMAX_2i) [2026-11-10]
+
+**Symptom (user, after BANK AUTO PTN 1):** with the AED open, a bank pick (-> pattern 1) left the
+editor on the previous part's sample (title, waveform, slices) while the trigs played the new
+part's sample; closing and reopening the AED fixed it. Stock gap, also reachable with a same-bank
+pattern change to a pattern on another part, or a part change.
+
+**Root cause:** the editor shows whatever (type, slot) was last handed to 0x4006de34, which (with
+the AED open) invalidates its pages via 0x4006dbe8. Track select publishes (0x40083c64); the UI
+message handlers that load a new part do not: pattern change 0x40062120 (part read from the pattern
+record, stored at 0x40062148 into 0x80000003 / 0x100b14cf) and part change 0x400621a6 (store at
+0x400621e8). Both then call 0x4002e5ac (0x4006214e, 0x40062248; the part-change site is the common
+tail of the changed and unchanged branches).
+
+**Fix:** `ak_part` in tools/patch_aedkey.s: those two `jsr 0x4002e5ac` become `jsr ak_part`
+(build_aedkey CALLS; build_all verifies the jsr opcode), which publishes the current track's slot
+through the existing ak_publish when AEDOPEN (0x460e5e4c) is non-zero, then tail-jumps to
+0x4002e5ac. ak_publish shrunk with mvz.b (now instruction-for-instruction the stock 0x40083c64
+sequence); the aedkey cave 0x400d6860..0x400d6900 holds 156 of 160 B (FULL). Behaviour change: an
+AED opened on a slot from the slot list switches to the track's slot on a pattern change, as on a
+track select.
+
+**Validation:** tools/emu_aedkey.py +8 cases (both sites x static / high slot 200 / flex / AED
+closed: publish equals the firmware's own track-select publish, call returns to site+6, registers
+kept); 15/15 green, the new cases fail on 2g. Gates: emu_check, verify_dual256 200/200, audit clean,
+emu_sliceview, emu_led, emu_autoptn, emu_ptnrestart, emu_scene2, emu_image, emu_lazy all green.
+Packaged out/OCTAMAX_2i.{syx,bin}; JSON regenerated (234 hunks, 6240 B), round-trip byte-identical.
+**Confirmed on hardware (2026-11-11, MKII, flashed as OCTAMAX_2i from the CF card).**

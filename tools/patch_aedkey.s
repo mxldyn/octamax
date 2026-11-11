@@ -12,6 +12,13 @@
 |
 | Fix: when either key OPENS the editor (it is closed), publish the track's (type, slot) first,
 | byte for byte the way 0x40083c64 does. Closing, and every other way in, is stock.
+|
+| OCTAMAX_2i: the same gap while the editor is OPEN. A pattern change (same bank, or a bank pick
+| with BANK AUTO PTN 1) or a part change loads another part, and with it other slots, but the UI
+| handler (0x40062120 pattern, 0x400621a6 part) never republishes: the editor kept drawing the old
+| part's sample while the trigs played the new one, until it was closed and reopened. Both handlers
+| call 0x4002e5ac right after storing the new part (0x4006214e, 0x40062248); ak_part takes that call
+| and, if the editor is open, publishes the track's slot first -- what a track select does.
 
     .equ AEDOPEN,  0x460e5e4c       | non-zero = the editor is open (its window handle)
     .equ BANKPTR,  0x46c82456       | -> bank base
@@ -22,6 +29,7 @@
     .equ CLOSE,    0x4006dd18
     .equ PAGEOK,   0x4006db58       | (page) -> page available for the published type
     .equ SLICES_RESUME, 0x4006e258  | after the displaced pea 1 ; jsr PAGEOK
+    .equ PART_NEXT, 0x4002e5ac      | the first refresh both part-change handlers call
 
     .text
     .global _start
@@ -47,16 +55,23 @@ ak_slices:
     jsr     PAGEOK
     jmp     SLICES_RESUME
 
+| 0x4006214e / 0x40062248 (jsr 0x4002e5ac after the part store). No arguments, so a tail jump
+| returns straight to the handler.
+    .global ak_part
+ak_part:
+    tst.l   AEDOPEN
+    beq.b   1f
+    bsr.b   ak_publish
+1:  jmp     PART_NEXT
+
 | ak_publish: PUBLISH(type, slot) of the current track, as 0x40083c64..0x40083cac. Preserves all
 | registers.
 ak_publish:
     lea     -20(%sp),%sp
     movem.l %d0-%d1/%a0-%a2,(%sp)
     movea.l BANKPTR,%a2
-    moveq   #0,%d0
-    move.b  G_PART,%d0
-    moveq   #0,%d1
-    move.b  G_TRACK,%d1
+    mvz.b   G_PART,%d0
+    mvz.b   G_TRACK,%d1
     movea.l %d1,%a1                 | a1 = track
     move.l  #6322,%d1
     muls.l  %d1,%d0                 | d0 = part * 6322
@@ -69,8 +84,7 @@ ak_publish:
     adda.l  %a1,%a2
     adda.l  %d1,%a2
     adda.l  #0x8f04a,%a2
-    moveq   #0,%d0
-    move.b  (%a2),%d0               | slot byte for that type (zero-extended: >= 128 survives)
+    mvz.b   (%a2),%d0               | slot byte for that type (zero-extended: >= 128 survives)
     move.l  %d0,-(%sp)
     move.l  %d1,-(%sp)
     jsr     PUBLISH

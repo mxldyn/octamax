@@ -41,6 +41,12 @@ that copy.
 
 ### What's new
 
+**AED follows pattern and bank changes.** *(fixed in 2i)* With the audio editor open, changing
+pattern (in the same bank, or picking a bank with BANK AUTO PTN 1) or changing part left the
+editor on the previous part's sample — name, waveform and slices — while the trigs already played
+the new one, until the editor was closed and reopened. The editor now switches to the track's
+sample as soon as the new part loads. Confirmed on hardware.
+
 **LAZY TRANSITIONS — fixes.** *(fixed in 2h)* The lazy-transition, sticky-scene, dimmed-LED
 and slice-playhead state used to sit in a RAM area that a stock audio analysis task also
 uses as its work buffer, so it could be overwritten mid-set: tracks went silent or jumped to the
@@ -136,7 +142,7 @@ alt="MIDI ARP SETUP with the key scale on C lydian (LYD)">
 </p>
 
 The behaviour switches live in the **PERSONALIZE** menu, unchecked by default. The unit
-reports `OCTAMAX_2h` in the boot splash and under SYSTEM STATUS → OS VERSION.
+reports `OCTAMAX_2i` in the boot splash and under SYSTEM STATUS → OS VERSION.
 
 **[How to build your flashable file →](#1-the-fast-path--apply-the-pre-built-patch)**
 
@@ -274,10 +280,10 @@ freshly flashed unit is indistinguishable from stock until you opt in:
 | **Slice playhead** | *(new in 2.0)* The SRC>SLICES view shows the playing slice number in a trig-key frame, a live progress bar and the slice's loop point; the playing slice's trig button lights amber and pulses with the tempo LED. While grid recording (`[REC]`) is on, the trig keys show steps and the slice LED stays off *(fixed in 2e)*. |
 | **Bank auto ptn 1** | *(new in 2d)* Picking a bank in SELECT BANK also selects its pattern 1 and closes the window, instead of waiting in `BANK x: SELECT PTN`. |
 | **PTN restart** | *(new in 2g)* `[PTN]` + the trig of the playing pattern restarts it at the next CHAIN BEHAVIOR window, the same moment a cue to another pattern would switch. The trig shows the cued look; a second press cancels. Always on — stock ignores that press. |
-| **AED key on the current slot** | *(fixed in 2f)* The `[AUDIO EDITOR]` key opens the editor on the track's current sample. Stock reused the sample the track had when it was last selected, so after a track copy/paste or a part reload the editor showed the old sample's name, waveform and slices. |
+| **AED key on the current slot** | *(fixed in 2f)* The `[AUDIO EDITOR]` key opens the editor on the track's current sample. Stock reused the sample the track had when it was last selected, so after a track copy/paste or a part reload the editor showed the old sample's name, waveform and slices. With the editor open, it also follows pattern, bank and part changes *(fixed in 2i)*. |
 | **PERSONALIZE options** | The four behavior switches (lazy transitions, no countdown, slice playhead, bank auto ptn 1), added to the PERSONALIZE menu, unchecked by default and persistent across power cycles and OS upgrades. |
 | **256 STATIC slots** | *(new in 2.0)* Sample slots 129–256, with slices, track assignment, parameter locks and persistence across a power cycle. Always on — it extends capacity rather than changing behaviour. Written up in [`DUAL256.md`](DUAL256.md). |
-| **Boot branding** | Boot splash and SYSTEM STATUS show `OCTAMAX_2h` instead of `1.40C`. |
+| **Boot branding** | Boot splash and SYSTEM STATUS show `OCTAMAX_2i` instead of `1.40C`. |
 
 The behaviour switches are the ones that stay off until you opt in; the extra arp scales only
 appear if you scroll past `OFF`/`maj`/`min`, the extra slots simply exist, and PTN restart only
@@ -347,7 +353,7 @@ Three commands, from a clean clone:
 python3 sysex/apply_patch.py \
     -i downloads/extracted/OCTATRACK_OS1.40C.syx \
     -p sysex/patches/octamax-2.0-beta.json \
-    -o OCTAMAX_2h.syx --bin OCTAMAX_2h.bin
+    -o OCTAMAX_2i.syx --bin OCTAMAX_2i.bin
 ```
 
 ```
@@ -356,9 +362,9 @@ target : Elektron Octatrack MKII OS 1.40C
 
 [1/5] stock .syx checksum ok
 [2/5] extracted section_3_MAIN_OS.bin (1,112,560 bytes)
-[3/5] applied 233 hunks (6220 bytes)
-[4/5] repacked -> OCTAMAX_2h.syx
-      CF image  -> OCTAMAX_2h.bin
+[3/5] applied 234 hunks (6240 bytes)
+[4/5] repacked -> OCTAMAX_2i.syx
+      CF image  -> OCTAMAX_2i.bin
 [5/5] output checksum ok — byte-identical to the reference build
 ```
 
